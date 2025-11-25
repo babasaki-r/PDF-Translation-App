@@ -112,13 +112,13 @@ function App() {
       <header style={styles.header}>
         <h1 style={styles.headerTitle}>PDF技術文書 翻訳システム</h1>
         <div style={styles.headerInfo}>
-          <span style={styles.badge}>{selectedQuality === 'high' ? 'Qwen3-14B' : selectedQuality === 'balanced' ? 'Qwen2.5-14B' : 'Qwen2.5-7B'}</span>
+          <span style={styles.badge}>{selectedQuality === 'high' ? 'Qwen3-14B' : selectedQuality === 'balanced' ? 'Qwen2.5-7B' : 'Qwen2.5-3B'}</span>
           <span style={styles.badge}>M4 Pro Optimized</span>
         </div>
       </header>
 
       {/* メインコンテンツ */}
-      <div style={styles.main}>
+      <div style={!file ? styles.mainCenter : styles.main}>
         {!file ? (
           // ファイルアップロード画面
           <FileUpload onFileSelect={handleFileSelect} isLoading={isUploading} />
@@ -250,6 +250,14 @@ const styles = {
   main: {
     flex: 1,
     display: 'flex',
+    overflow: 'auto',
+    minHeight: 0,
+  } as React.CSSProperties,
+  mainCenter: {
+    flex: 1,
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
     overflow: 'auto',
     minHeight: 0,
   } as React.CSSProperties,

@@ -20,10 +20,10 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
   const getModelName = (quality: string) => {
     const modelMap: Record<string, string> = {
       'high': 'Qwen3-14B',
-      'balanced': 'Qwen2.5-14B',
-      'fast': 'Qwen2.5-7B'
+      'balanced': 'Qwen2.5-7B',
+      'fast': 'Qwen2.5-3B'
     };
-    return modelMap[quality] || 'Qwen2.5-14B';
+    return modelMap[quality] || 'Qwen2.5-7B';
   };
 
   if (isTranslating) {
@@ -140,7 +140,7 @@ const styles = {
     borderRadius: '6px',
     padding: '16px',
     backgroundColor: '#f7fafc',
-    maxHeight: '300px',
+    minHeight: '200px',
     overflow: 'auto',
   } as React.CSSProperties,
   text: {

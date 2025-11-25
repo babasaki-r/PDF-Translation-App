@@ -12,9 +12,9 @@ class Qwen3Translator:
 
     # モデル定義
     MODELS = {
-        "high": "Qwen/Qwen3-14B",      # 高品質
-        "balanced": "Qwen/Qwen2.5-14B-Instruct",  # バランス
-        "fast": "Qwen/Qwen2.5-7B-Instruct"       # 高速
+        "high": "Qwen/Qwen3-14B",      # 高品質 (28GB)
+        "balanced": "Qwen/Qwen2.5-7B-Instruct",  # バランス (14GB) - 旧7Bを昇格
+        "fast": "Qwen/Qwen2.5-3B-Instruct"       # 高速 (6GB) - より小さく高速
     }
 
     # 品質設定
@@ -24,7 +24,7 @@ class Qwen3Translator:
             "temperature": 0.1,
             "top_p": 0.95,
             "do_sample": False,
-            "num_beams": 1,  # より高品質だが遅い
+            "num_beams": 1,
         },
         "balanced": {
             "max_new_tokens": 1536,
@@ -34,9 +34,9 @@ class Qwen3Translator:
             "num_beams": 1,
         },
         "fast": {
-            "max_new_tokens": 768,  # より短く設定
-            "temperature": 0.3,
-            "top_p": 0.85,
+            "max_new_tokens": 512,  # 3Bモデル用に最適化
+            "temperature": 0.2,
+            "top_p": 0.9,
             "do_sample": False,
             "num_beams": 1,
         }
@@ -75,9 +75,13 @@ class Qwen3Translator:
             trust_remote_code=True
         )
 
+        # Apple Silicon (MPS) では8bit量子化が未サポートのため、float16を使用
+        # メモリ効率化のためlow_cpu_mem_usageを有効化
+        logger.info(f"Loading model with float16 precision ({self.quality} mode)")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            dtype=torch.float16,  # メモリ効率化
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,  # メモリ効率化
             trust_remote_code=True
         )
 

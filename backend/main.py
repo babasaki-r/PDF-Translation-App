@@ -374,13 +374,13 @@ async def get_quality_info():
                 },
                 "balanced": {
                     "model": Qwen3Translator.MODELS["balanced"],
-                    "description": "バランス - Qwen2.5-14B",
+                    "description": "バランス - Qwen2.5-7B",
                     "speed": "中",
                     "quality": "高"
                 },
                 "fast": {
                     "model": Qwen3Translator.MODELS["fast"],
-                    "description": "高速 - Qwen2.5-7B",
+                    "description": "高速 - Qwen2.5-3B",
                     "speed": "速い",
                     "quality": "中"
                 }

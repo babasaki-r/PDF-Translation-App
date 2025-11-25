@@ -26,6 +26,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   const [qualityInfo, setQualityInfo] = useState<QualityInfo | null>(null);
   const [downloadFormat, setDownloadFormat] = useState<'original' | 'translated' | 'both'>('both');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isQualityExpanded, setIsQualityExpanded] = useState(false);
+  const [isDownloadExpanded, setIsDownloadExpanded] = useState(false);
 
   useEffect(() => {
     loadQualityInfo();
@@ -78,33 +80,46 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   return (
     <div style={styles.container}>
-      {/* 品質選択 */}
+      {/* 品質選択（折りたたみ可能） */}
       <div style={styles.section}>
-        <h3 style={styles.sectionTitle}>翻訳品質</h3>
-        <div style={styles.qualityButtons}>
-          {qualityInfo && Object.entries(qualityInfo.options).map(([key, option]) => (
-            <button
-              key={key}
-              onClick={() => onQualityChange(key)}
-              style={{
-                ...styles.qualityButton,
-                ...(selectedQuality === key ? styles.qualityButtonActive : {}),
-              }}
-              disabled={isTranslating}
-            >
-              <div style={styles.qualityLabel}>{option.description}</div>
-              <div style={styles.qualityDetails}>
-                速度: {option.speed} | 品質: {option.quality}
-              </div>
-            </button>
-          ))}
+        <div
+          style={styles.sectionHeader}
+          onClick={() => setIsQualityExpanded(!isQualityExpanded)}
+        >
+          <h3 style={styles.sectionTitle}>
+            {isQualityExpanded ? '▼' : '▶'} 翻訳品質設定
+          </h3>
+          <span style={styles.currentSelection}>
+            現在: {selectedQuality === 'high' ? '高品質' : selectedQuality === 'balanced' ? 'バランス' : '高速'}
+          </span>
         </div>
+        {isQualityExpanded && (
+          <div style={styles.expandedContent}>
+            <div style={styles.qualityButtons}>
+              {qualityInfo && Object.entries(qualityInfo.options).map(([key, option]) => (
+                <button
+                  key={key}
+                  onClick={() => onQualityChange(key)}
+                  style={{
+                    ...styles.qualityButton,
+                    ...(selectedQuality === key ? styles.qualityButtonActive : {}),
+                  }}
+                  disabled={isTranslating}
+                >
+                  <div style={styles.qualityLabel}>{option.description}</div>
+                  <div style={styles.qualityDetails}>
+                    速度: {option.speed} | 品質: {option.quality}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 翻訳進捗 */}
+      {/* 翻訳進捗（折りたたみ不可、常に表示） */}
       {isTranslating && translationProgress && (
         <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>翻訳進捗</h3>
           <div style={styles.progressContainer}>
             <div style={styles.progressBar}>
               <div
@@ -122,62 +137,75 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       )}
 
-      {/* ダウンロード */}
+      {/* ダウンロード（折りたたみ可能） */}
       {translatedPages.length > 0 && !isTranslating && (
         <div style={styles.section}>
-          <h3 style={styles.sectionTitle}>ダウンロード</h3>
-
-          {/* フォーマット選択 */}
-          <div style={styles.formatSelector}>
-            <label style={styles.formatLabel}>
-              <input
-                type="radio"
-                value="both"
-                checked={downloadFormat === 'both'}
-                onChange={(e) => setDownloadFormat(e.target.value as any)}
-                style={styles.radio}
-              />
-              原文と翻訳
-            </label>
-            <label style={styles.formatLabel}>
-              <input
-                type="radio"
-                value="original"
-                checked={downloadFormat === 'original'}
-                onChange={(e) => setDownloadFormat(e.target.value as any)}
-                style={styles.radio}
-              />
-              原文のみ
-            </label>
-            <label style={styles.formatLabel}>
-              <input
-                type="radio"
-                value="translated"
-                checked={downloadFormat === 'translated'}
-                onChange={(e) => setDownloadFormat(e.target.value as any)}
-                style={styles.radio}
-              />
-              翻訳のみ
-            </label>
+          <div
+            style={styles.sectionHeader}
+            onClick={() => setIsDownloadExpanded(!isDownloadExpanded)}
+          >
+            <h3 style={styles.sectionTitle}>
+              {isDownloadExpanded ? '▼' : '▶'} ダウンロード
+            </h3>
+            <span style={styles.currentSelection}>
+              {translatedPages.length}ページ準備完了
+            </span>
           </div>
+          {isDownloadExpanded && (
+            <div style={styles.expandedContent}>
+              {/* フォーマット選択 */}
+              <div style={styles.formatSelector}>
+                <label style={styles.formatLabel}>
+                  <input
+                    type="radio"
+                    value="both"
+                    checked={downloadFormat === 'both'}
+                    onChange={(e) => setDownloadFormat(e.target.value as any)}
+                    style={styles.radio}
+                  />
+                  原文と翻訳
+                </label>
+                <label style={styles.formatLabel}>
+                  <input
+                    type="radio"
+                    value="original"
+                    checked={downloadFormat === 'original'}
+                    onChange={(e) => setDownloadFormat(e.target.value as any)}
+                    style={styles.radio}
+                  />
+                  原文のみ
+                </label>
+                <label style={styles.formatLabel}>
+                  <input
+                    type="radio"
+                    value="translated"
+                    checked={downloadFormat === 'translated'}
+                    onChange={(e) => setDownloadFormat(e.target.value as any)}
+                    style={styles.radio}
+                  />
+                  翻訳のみ
+                </label>
+              </div>
 
-          {/* ダウンロードボタン */}
-          <div style={styles.downloadButtons}>
-            <button
-              onClick={() => handleDownload('current')}
-              style={styles.downloadButton}
-              disabled={isDownloading}
-            >
-              📄 現在のページ
-            </button>
-            <button
-              onClick={() => handleDownload('all')}
-              style={styles.downloadButtonPrimary}
-              disabled={isDownloading}
-            >
-              📚 全ページ ({translatedPages.length}ページ)
-            </button>
-          </div>
+              {/* ダウンロードボタン */}
+              <div style={styles.downloadButtons}>
+                <button
+                  onClick={() => handleDownload('current')}
+                  style={styles.downloadButton}
+                  disabled={isDownloading}
+                >
+                  📄 現在のページ
+                </button>
+                <button
+                  onClick={() => handleDownload('all')}
+                  style={styles.downloadButtonPrimary}
+                  disabled={isDownloading}
+                >
+                  📚 全ページ ({translatedPages.length}ページ)
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -186,19 +214,43 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
 const styles = {
   container: {
-    padding: '20px',
+    padding: '12px',
     backgroundColor: '#f8f9fa',
     borderRadius: '8px',
-    marginBottom: '20px',
+    marginBottom: '12px',
   } as React.CSSProperties,
   section: {
-    marginBottom: '24px',
+    marginBottom: '12px',
+  } as React.CSSProperties,
+  sectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px',
+    backgroundColor: 'white',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s',
+    border: '1px solid #e2e8f0',
   } as React.CSSProperties,
   sectionTitle: {
-    fontSize: '16px',
+    fontSize: '14px',
     fontWeight: 'bold' as const,
-    marginBottom: '12px',
+    margin: 0,
     color: '#2d3748',
+    userSelect: 'none' as const,
+  } as React.CSSProperties,
+  currentSelection: {
+    fontSize: '12px',
+    color: '#718096',
+    fontWeight: 'normal' as const,
+  } as React.CSSProperties,
+  expandedContent: {
+    marginTop: '8px',
+    padding: '12px',
+    backgroundColor: 'white',
+    borderRadius: '6px',
+    border: '1px solid #e2e8f0',
   } as React.CSSProperties,
   qualityButtons: {
     display: 'flex',
@@ -228,17 +280,18 @@ const styles = {
     color: '#718096',
   } as React.CSSProperties,
   progressContainer: {
-    padding: '12px',
+    padding: '8px 12px',
     backgroundColor: 'white',
-    borderRadius: '8px',
+    borderRadius: '6px',
+    border: '1px solid #e2e8f0',
   } as React.CSSProperties,
   progressBar: {
     width: '100%',
-    height: '24px',
+    height: '20px',
     backgroundColor: '#e2e8f0',
-    borderRadius: '12px',
+    borderRadius: '10px',
     overflow: 'hidden',
-    marginBottom: '8px',
+    marginBottom: '6px',
   } as React.CSSProperties,
   progressFill: {
     height: '100%',
