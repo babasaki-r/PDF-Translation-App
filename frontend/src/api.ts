@@ -99,3 +99,23 @@ export const updateGlossary = async (glossary: Record<string, string>): Promise<
   const response = await api.post('/api/glossary/update', { glossary });
   return response.data;
 };
+
+// 校正
+export const proofreadTranslation = async (
+  original: string,
+  translated: string,
+  page?: number
+): Promise<{
+  success: boolean;
+  page?: number;
+  has_issues: boolean;
+  corrected_text: string;
+  issues: Array<{ type: string; description: string; suggestion: string }>;
+}> => {
+  const response = await api.post('/api/proofread', {
+    original,
+    translated,
+    page,
+  });
+  return response.data;
+};

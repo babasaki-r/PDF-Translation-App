@@ -106,6 +106,31 @@ function App() {
     setCurrentPage(page);
   };
 
+  const handleRetranslate = async () => {
+    if (pagesData.length === 0) {
+      return;
+    }
+
+    if (!window.confirm(`現在の品質設定(${selectedQuality})で再翻訳しますか？`)) {
+      return;
+    }
+
+    setIsTranslating(true);
+    setError(null);
+    setTranslatedPages([]); // 既存の翻訳をクリア
+
+    try {
+      const response = await translatePages(pagesData, selectedQuality);
+      setTranslatedPages(response.pages);
+      console.log('Re-translation completed with quality:', selectedQuality);
+    } catch (err) {
+      console.error('Re-translation error:', err);
+      setError('再翻訳に失敗しました。');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   return (
     <div style={styles.app}>
       {/* ヘッダー */}
@@ -145,6 +170,7 @@ function App() {
                   selectedQuality={selectedQuality}
                   translationProgress={translationProgress}
                   isTranslating={isTranslating}
+                  onRetranslate={handleRetranslate}
                 />
               )}
 

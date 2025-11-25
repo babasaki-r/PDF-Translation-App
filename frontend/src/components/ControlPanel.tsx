@@ -13,6 +13,7 @@ interface ControlPanelProps {
     percentage: number;
   } | null;
   isTranslating: boolean;
+  onRetranslate?: () => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -22,6 +23,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   selectedQuality,
   translationProgress,
   isTranslating,
+  onRetranslate,
 }) => {
   const [qualityInfo, setQualityInfo] = useState<QualityInfo | null>(null);
   const [downloadFormat, setDownloadFormat] = useState<'original' | 'translated' | 'both'>('both');
@@ -113,6 +115,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </button>
               ))}
             </div>
+            {/* 再翻訳ボタン */}
+            {translatedPages.length > 0 && onRetranslate && (
+              <button
+                onClick={onRetranslate}
+                style={styles.retranslateButton}
+                disabled={isTranslating}
+              >
+                🔄 現在の品質設定で再翻訳
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -348,6 +360,20 @@ const styles = {
     flex: 1,
     padding: '12px 20px',
     backgroundColor: '#3182ce',
+    border: 'none',
+    color: 'white',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  } as React.CSSProperties,
+  retranslateButton: {
+    width: '100%',
+    marginTop: '12px',
+    padding: '12px 20px',
+    backgroundColor: '#805ad5',
     border: 'none',
     color: 'white',
     borderRadius: '8px',

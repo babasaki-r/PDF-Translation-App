@@ -477,6 +477,55 @@ async def get_glossary():
         raise HTTPException(status_code=500, detail=f"Glossary get error: {str(e)}")
 
 
+@app.post("/api/proofread")
+async def proofread_translation(data: Dict):
+    """
+    翻訳の校正を実行
+
+    Args:
+        data: {
+            "original": "原文",
+            "translated": "翻訳文",
+            "page": ページ番号（オプション）
+        }
+
+    Returns:
+        校正結果
+    """
+    try:
+        original = data.get("original", "")
+        translated = data.get("translated", "")
+        page = data.get("page", None)
+
+        if not original or not translated:
+            raise HTTPException(status_code=400, detail="Both original and translated text are required")
+
+        logger.info(f"Proofreading translation for page {page}...")
+
+        translator = get_translator()
+
+        # 非同期で校正実行
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            translator.proofread_translation,
+            original,
+            translated
+        )
+
+        return JSONResponse({
+            "success": True,
+            "page": page,
+            "has_issues": result["has_issues"],
+            "corrected_text": result["corrected_text"],
+            "issues": result["issues"]
+        })
+
+    except Exception as e:
+        logger.error(f"Proofread error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Proofread error: {str(e)}")
+
+
 def _generate_text_file(pages_data: List[Dict], format_type: str) -> str:
     """
     翻訳結果からテキストファイルを生成
