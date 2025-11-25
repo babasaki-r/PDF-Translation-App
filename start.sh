@@ -93,3 +93,22 @@ echo -e "${BLUE}========================================${NC}"
 mkdir -p .pids
 echo $BACKEND_PID > .pids/backend.pid
 echo $FRONTEND_PID > .pids/frontend.pid
+
+# フロントエンドの起動を待機
+echo -e "\n${YELLOW}フロントエンドの起動を待機中...${NC}"
+for i in {1..30}; do
+    if curl -s http://localhost:5173 > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ フロントエンドが起動しました${NC}"
+        break
+    fi
+    sleep 1
+    if [ $i -eq 30 ]; then
+        echo -e "${YELLOW}⚠ フロントエンドの起動確認がタイムアウトしました${NC}"
+    fi
+done
+
+# Chromeでフロントエンドを開く
+echo -e "\n${GREEN}🌐 Chromeでフロントエンドを開いています...${NC}"
+open -a "Google Chrome" http://localhost:5173
+
+echo -e "\n${GREEN}✓ すべての起動処理が完了しました${NC}"
