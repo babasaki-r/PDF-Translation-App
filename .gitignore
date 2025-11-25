@@ -80,5 +80,5 @@ translations/
 .DS_Store
 Thumbs.db
 
-# Glossary data (if you want to track it, remove this line)
-# backend/glossary.json
+# Process ID files
+.pids/
