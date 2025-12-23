@@ -18,9 +18,22 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
   onPageChange,
 }) => {
   const [numPages, setNumPages] = React.useState<number>(0);
+  const [scale, setScale] = React.useState<number>(1.0);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
+  };
+
+  const handleZoomIn = () => {
+    setScale(prev => Math.min(prev + 0.25, 3.0));
+  };
+
+  const handleZoomOut = () => {
+    setScale(prev => Math.max(prev - 0.25, 0.5));
+  };
+
+  const handleResetZoom = () => {
+    setScale(1.0);
   };
 
   if (!file) {
@@ -51,6 +64,35 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         >
           次へ →
         </button>
+
+        <div style={styles.divider}></div>
+
+        <button
+          onClick={handleZoomOut}
+          disabled={scale <= 0.5}
+          style={styles.zoomButton}
+          title="縮小"
+        >
+          −
+        </button>
+        <span style={styles.zoomInfo}>
+          {Math.round(scale * 100)}%
+        </span>
+        <button
+          onClick={handleZoomIn}
+          disabled={scale >= 3.0}
+          style={styles.zoomButton}
+          title="拡大"
+        >
+          +
+        </button>
+        <button
+          onClick={handleResetZoom}
+          style={styles.resetButton}
+          title="リセット"
+        >
+          リセット
+        </button>
       </div>
       <div style={styles.pdfContainer}>
         <Document
@@ -60,7 +102,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
         >
           <Page
             pageNumber={currentPage}
-            width={600}
+            scale={scale}
             renderTextLayer={true}
             renderAnnotationLayer={true}
           />
@@ -101,6 +143,45 @@ const styles = {
     fontWeight: 'bold' as const,
     minWidth: '80px',
     textAlign: 'center' as const,
+  } as React.CSSProperties,
+  divider: {
+    width: '1px',
+    height: '24px',
+    backgroundColor: '#e2e8f0',
+    margin: '0 8px',
+  } as React.CSSProperties,
+  zoomButton: {
+    width: '32px',
+    height: '32px',
+    padding: '0',
+    backgroundColor: '#3182ce',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '18px',
+    fontWeight: 'bold' as const,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'background-color 0.2s',
+  } as React.CSSProperties,
+  zoomInfo: {
+    fontSize: '14px',
+    fontWeight: 'bold' as const,
+    minWidth: '60px',
+    textAlign: 'center' as const,
+    color: '#2d3748',
+  } as React.CSSProperties,
+  resetButton: {
+    padding: '6px 12px',
+    backgroundColor: '#718096',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    transition: 'background-color 0.2s',
   } as React.CSSProperties,
   pdfContainer: {
     flex: 1,

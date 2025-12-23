@@ -4,6 +4,8 @@ from typing import List, Dict
 import logging
 import json
 import os
+import gc
+import subprocess
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
@@ -139,26 +141,9 @@ class Qwen3Translator:
         self.model = self.model.to(self.device)
         self.model.eval()
 
-        # PyTorch 2.0の最適化機能を有効化（可能な場合）
-        try:
-            # BetterTransformerで高速化を試みる
-            from optimum.bettertransformer import BetterTransformer
-            logger.info("Applying BetterTransformer optimization...")
-            self.model = BetterTransformer.transform(self.model)
-            logger.info("BetterTransformer optimization applied")
-        except Exception as e:
-            logger.warning(f"BetterTransformer not available: {e}")
-
-        # torch.compile()で更に高速化（PyTorch 2.0以降）
-        try:
-            import torch._dynamo as dynamo
-            if hasattr(torch, 'compile') and self.device == "mps":
-                logger.info("Compiling model with torch.compile()...")
-                # MPSではデフォルトのreduceバックエンドを使用
-                self.model = torch.compile(self.model, mode="reduce-overhead")
-                logger.info("Model compiled successfully")
-        except Exception as e:
-            logger.warning(f"torch.compile() not available: {e}")
+        # 注意: BetterTransformerとtorch.compile()はメモリを大量に消費するため無効化
+        # これによりメモリ使用量を大幅に削減
+        logger.info("Skipping BetterTransformer and torch.compile() to reduce memory usage")
 
         logger.info("Model loaded and optimized successfully")
 
@@ -238,6 +223,10 @@ Output only the final Japanese translation."""
         # 文字化け修正: (cid127) → ・
         response = self._fix_encoding_issues(response)
 
+        # メモリ解放
+        del model_inputs, generated_ids
+        self._clear_memory_cache()
+
         return response.strip()
 
     def translate_batch(self, texts: List[str], context: str = "") -> List[str]:
@@ -264,7 +253,7 @@ Output only the final Japanese translation."""
 
         Args:
             pages_data: ページごとのテキストデータ
-                [{"page": 1, "text": "...", "sections": [...]}, ...]
+                [{"page": 1, "text": "..."}, ...]
             progress_callback: 進捗コールバック関数 callback(current, total, page_num)
 
         Returns:
@@ -293,8 +282,7 @@ Output only the final Japanese translation."""
             translated_page = {
                 "page": page_num,
                 "original_text": page_data.get("text", ""),
-                "translated_text": "",
-                "sections": []
+                "translated_text": ""
             }
 
             # ページ全体のテキストを翻訳
@@ -304,19 +292,15 @@ Output only the final Japanese translation."""
                     context="Steel industry equipment specification document"
                 )
 
-            # セクションごとに翻訳（より詳細な制御が必要な場合）
-            for section in page_data.get("sections", []):
-                translated_section = {
-                    "original": section.get("text", ""),
-                    "translated": self.translate_text(
-                        section.get("text", ""),
-                        context=f"Page {page_num}, Section"
-                    ),
-                    "metadata": section.get("metadata", {})
-                }
-                translated_page["sections"].append(translated_section)
-
             translated_pages.append(translated_page)
+
+            # 5ページごとにメモリを積極的に解放
+            if idx % 5 == 0:
+                self._clear_memory_cache()
+                logger.info(f"Memory cache cleared after page {idx}")
+
+        # 最後にもメモリ解放
+        self._clear_memory_cache()
 
         return translated_pages
 
@@ -400,6 +384,15 @@ Output only the final Japanese translation."""
         glossary_lines = [f"{en} → {ja}" for en, ja in self.glossary.items()]
         return f"\n\nUse these terminology translations:\n" + "\n".join(glossary_lines)
 
+    def _clear_memory_cache(self):
+        """
+        GPUメモリキャッシュをクリア
+        """
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+            torch.mps.synchronize()
+        gc.collect()
+
     def update_glossary(self, glossary: Dict[str, str]):
         """
         用語集を更新
@@ -423,50 +416,32 @@ Output only the final Japanese translation."""
         save_glossary_to_file(self.glossary)
         logger.info(f"Added glossary term: {english} → {japanese}")
 
-    def proofread_translation(self, original_text: str, translated_text: str) -> Dict:
+    def ask_question(self, question: str, context: str) -> str:
         """
-        翻訳の校正を実行
-        LLMを使用して翻訳の正確性を検証し、問題点を指摘・修正
+        PDFの内容に関する質問に回答
 
         Args:
-            original_text: 元の英語テキスト
-            translated_text: 翻訳された日本語テキスト
+            question: ユーザーからの質問
+            context: PDFから抽出されたテキスト（質問の文脈として使用）
 
         Returns:
-            校正結果 {
-                "has_issues": bool,
-                "corrected_text": str,
-                "issues": [{"type": str, "description": str, "suggestion": str}]
-            }
+            AIからの回答
         """
-        prompt = f"""You are a professional proofreader for technical translations in the steel industry.
+        # コンテキストが長すぎる場合は切り詰める（トークン制限対策）
+        max_context_length = 6000
+        if len(context) > max_context_length:
+            context = context[:max_context_length] + "\n...(以下省略)"
 
-Review the following English-to-Japanese translation for accuracy, terminology consistency, and naturalness.
+        prompt = f"""PDF文書の内容に基づいて質問に回答してください。
 
-Original English:
-{original_text}
+文書内容:
+{context}
 
-Japanese Translation:
-{translated_text}
+質問: {question}
 
-Analyze this translation and:
-1. Check if the meaning is accurately conveyed
-2. Verify technical terminology is correct for steel industry
-3. Check for any Chinese characters that should be Japanese
-4. Ensure natural Japanese expression
+回答:"""
 
-If there are issues, provide a corrected version and list the problems found.
-
-Output format:
-HAS_ISSUES: [YES/NO]
-CORRECTED_TEXT: [corrected Japanese text if needed, or same text if no issues]
-ISSUES: [list issues found, one per line with format "TYPE: description - suggestion"]
-
-Response:"""
-
-        system_content = """You are a professional technical translation proofreader specializing in steel industry documentation.
-Analyze translations carefully and provide constructive feedback.
-Always output in a structured format."""
+        system_content = """技術文書に関する質問に回答するアシスタントです。日本語で簡潔に回答してください。"""
 
         messages = [
             {"role": "system", "content": system_content},
@@ -482,21 +457,20 @@ Always output in a structured format."""
 
         model_inputs = self.tokenizer([text_input], return_tensors="pt").to(self.device)
 
-        # 校正には高品質設定を使用
+        # 質問回答用の設定
         gen_settings = {
-            "max_new_tokens": 2048,
-            "temperature": 0.1,
-            "top_p": 0.95,
+            "max_new_tokens": 1024,
+            "temperature": 0.7,
+            "top_p": 0.9,
             "do_sample": False,
             "num_beams": 1,
         }
 
-        # torch.inference_mode()はno_grad()より高速
         with torch.inference_mode():
             generated_ids = self.model.generate(
                 **model_inputs,
                 **gen_settings,
-                use_cache=True,  # KV Cacheを明示的に有効化
+                use_cache=True,
                 pad_token_id=self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
             )
 
@@ -508,41 +482,11 @@ Always output in a structured format."""
         response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         response = self._remove_think_tags(response)
 
-        # レスポンスをパース
-        has_issues = "YES" in response.split("HAS_ISSUES:")[1].split("\n")[0].upper() if "HAS_ISSUES:" in response else False
+        # メモリ解放
+        del model_inputs, generated_ids
+        self._clear_memory_cache()
 
-        corrected_text = translated_text  # デフォルトは元のテキスト
-        if "CORRECTED_TEXT:" in response:
-            corrected_part = response.split("CORRECTED_TEXT:")[1]
-            if "ISSUES:" in corrected_part:
-                corrected_text = corrected_part.split("ISSUES:")[0].strip()
-            else:
-                corrected_text = corrected_part.strip()
-
-        issues = []
-        if "ISSUES:" in response:
-            issues_text = response.split("ISSUES:")[1].strip()
-            for line in issues_text.split("\n"):
-                line = line.strip()
-                if line and ":" in line:
-                    parts = line.split(":", 1)
-                    if len(parts) == 2:
-                        issue_type = parts[0].strip()
-                        rest = parts[1].strip()
-                        if " - " in rest:
-                            desc, sugg = rest.split(" - ", 1)
-                            issues.append({
-                                "type": issue_type,
-                                "description": desc.strip(),
-                                "suggestion": sugg.strip()
-                            })
-
-        return {
-            "has_issues": has_issues,
-            "corrected_text": corrected_text,
-            "issues": issues,
-            "raw_response": response
-        }
+        return response.strip()
 
     def unload_model(self):
         """
@@ -565,7 +509,7 @@ Always output in a structured format."""
 
 # グローバルインスタンス管理（1つのみメモリに保持）
 _current_translator = None
-_current_quality = "balanced"
+_current_quality = "fast"  # デフォルトを最軽量モデル(3B)に変更してメモリ使用量を削減
 
 
 def get_translator(quality: str = None) -> Qwen3Translator:
@@ -617,3 +561,313 @@ def set_quality(quality: str):
         logger.info(f"Default quality set to: {quality}")
     else:
         logger.warning(f"Invalid quality: {quality}. Keeping current: {_current_quality}")
+
+
+class AppleTranslator:
+    """
+    AppleのTranslation framework (macOS 15+) を使用した軽量翻訳エンジン
+    オフラインで動作可能（言語パックがダウンロード済みの場合）
+    """
+
+    def __init__(self):
+        """
+        Apple翻訳エンジンの初期化
+        """
+        logger.info("Initializing Apple Translator...")
+
+        # 用語集の初期化
+        self.glossary = load_glossary_from_file()
+
+        # 進捗トラッキング用
+        self.current_page = 0
+        self.total_pages = 0
+        self.is_cancelled = False
+
+        # Swiftスクリプトのパス
+        self.swift_script_path = Path(__file__).parent / "apple_translate.swift"
+
+        # Apple Translation APIが利用可能かチェック
+        self.apple_api_available = self._check_apple_api()
+
+        if self.apple_api_available:
+            logger.info("Apple Translation API is available (macOS 15+)")
+        else:
+            logger.warning("Apple Translation API not available. Will use fallback.")
+
+        logger.info("Apple Translator initialized")
+
+    def _check_apple_api(self) -> bool:
+        """
+        Apple Translation APIが利用可能かチェック
+        """
+        try:
+            # macOSバージョンをチェック
+            result = subprocess.run(
+                ['sw_vers', '-productVersion'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()
+                major_version = int(version.split('.')[0])
+                # macOS 15 (Sequoia) 以降が必要
+                return major_version >= 15
+        except Exception as e:
+            logger.warning(f"Failed to check macOS version: {e}")
+        return False
+
+    def translate_text(self, text: str, context: str = "") -> str:
+        """
+        AppleのTranslation APIを使用してテキストを翻訳
+
+        Args:
+            text: 翻訳するテキスト
+            context: 翻訳の文脈情報（オプション、未使用）
+
+        Returns:
+            翻訳されたテキスト
+        """
+        if not text.strip():
+            return ""
+
+        try:
+            # 用語集の前処理：テキスト内の用語を一時的にマーカーで置換
+            text_with_markers, markers = self._apply_glossary_markers(text)
+
+            # Apple Translation APIで翻訳
+            translated = self._translate_with_apple_api(text_with_markers)
+
+            # マーカーを用語集の日本語訳に置換
+            translated = self._replace_markers_with_translations(translated, markers)
+
+            return translated.strip()
+
+        except Exception as e:
+            logger.error(f"Apple translation error: {e}")
+            # フォールバック: 元のテキストを返す
+            return f"[翻訳エラー] {text}"
+
+    def _translate_with_apple_api(self, text: str) -> str:
+        """
+        Apple Translation APIを使用して翻訳
+
+        Args:
+            text: 翻訳するテキスト
+
+        Returns:
+            翻訳されたテキスト
+        """
+        # テキストが長い場合は分割して翻訳
+        max_length = 4000  # 安全なサイズ
+        if len(text) > max_length:
+            chunks = self._split_text(text, max_length)
+            translated_chunks = []
+            for chunk in chunks:
+                translated_chunk = self._call_swift_translator(chunk)
+                translated_chunks.append(translated_chunk)
+            return '\n'.join(translated_chunks)
+        else:
+            return self._call_swift_translator(text)
+
+    def _call_swift_translator(self, text: str) -> str:
+        """
+        Swiftスクリプトを呼び出してApple Translation APIを使用
+
+        Args:
+            text: 翻訳するテキスト
+
+        Returns:
+            翻訳されたテキスト
+        """
+        if not self.apple_api_available:
+            raise Exception("Apple Translation API is not available on this system")
+
+        try:
+            # 一時ファイルにテキストを書き込む（長いテキスト対応）
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+                f.write(text)
+                temp_file = f.name
+
+            try:
+                # Swiftスクリプトを実行
+                result = subprocess.run(
+                    ['swift', str(self.swift_script_path), temp_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env={**os.environ, 'LANG': 'en_US.UTF-8'}
+                )
+
+                if result.returncode == 0:
+                    return result.stdout.strip()
+                else:
+                    logger.error(f"Swift translation error: {result.stderr}")
+                    raise Exception(f"Translation failed: {result.stderr}")
+
+            finally:
+                # 一時ファイルを削除
+                os.unlink(temp_file)
+
+        except subprocess.TimeoutExpired:
+            raise Exception("Translation timed out")
+        except Exception as e:
+            raise Exception(f"Failed to call Swift translator: {e}")
+
+    def _split_text(self, text: str, max_length: int) -> List[str]:
+        """
+        テキストを指定された最大長で分割
+
+        Args:
+            text: 分割するテキスト
+            max_length: 最大文字数
+
+        Returns:
+            分割されたテキストのリスト
+        """
+        chunks = []
+        current_chunk = ""
+
+        for line in text.split('\n'):
+            if len(current_chunk) + len(line) + 1 <= max_length:
+                current_chunk += line + '\n'
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = line + '\n'
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        return chunks
+
+    def _apply_glossary_markers(self, text: str) -> tuple:
+        """
+        用語集の用語をマーカーで置換
+
+        Args:
+            text: 元のテキスト
+
+        Returns:
+            (マーカー付きテキスト, マーカー辞書)
+        """
+        markers = {}
+        result = text
+
+        for idx, (english, japanese) in enumerate(self.glossary.items()):
+            marker = f"__GLOSSARY_{idx}__"
+            if english.lower() in result.lower():
+                # 大文字小文字を無視して置換
+                import re
+                pattern = re.compile(re.escape(english), re.IGNORECASE)
+                result = pattern.sub(marker, result)
+                markers[marker] = japanese
+
+        return result, markers
+
+    def _replace_markers_with_translations(self, text: str, markers: dict) -> str:
+        """
+        マーカーを用語集の日本語訳に置換
+
+        Args:
+            text: マーカー付きテキスト
+            markers: マーカー辞書
+
+        Returns:
+            置換後のテキスト
+        """
+        result = text
+        for marker, japanese in markers.items():
+            result = result.replace(marker, japanese)
+        return result
+
+    def translate_pages(self, pages_data: List[Dict], progress_callback=None) -> List[Dict]:
+        """
+        PDFページデータの翻訳
+
+        Args:
+            pages_data: ページごとのテキストデータ
+            progress_callback: 進捗コールバック関数
+
+        Returns:
+            翻訳されたページデータ
+        """
+        translated_pages = []
+        self.total_pages = len(pages_data)
+        self.current_page = 0
+        self.is_cancelled = False
+
+        for idx, page_data in enumerate(pages_data, start=1):
+            if self.is_cancelled:
+                logger.info(f"Translation cancelled at page {idx}/{self.total_pages}")
+                break
+
+            page_num = page_data.get("page", 0)
+            self.current_page = idx
+
+            logger.info(f"[Apple] Translating page {page_num} ({idx}/{self.total_pages})...")
+
+            if progress_callback:
+                progress_callback(idx, self.total_pages, page_num)
+
+            translated_page = {
+                "page": page_num,
+                "original_text": page_data.get("text", ""),
+                "translated_text": ""
+            }
+
+            if page_data.get("text"):
+                translated_page["translated_text"] = self.translate_text(page_data["text"])
+
+            translated_pages.append(translated_page)
+
+        return translated_pages
+
+    def get_progress(self) -> Dict:
+        """現在の翻訳進捗を取得"""
+        if self.total_pages == 0:
+            return {"current": 0, "total": 0, "percentage": 0.0}
+
+        percentage = (self.current_page / self.total_pages) * 100
+        return {
+            "current": self.current_page,
+            "total": self.total_pages,
+            "percentage": round(percentage, 2)
+        }
+
+    def cancel_translation(self):
+        """翻訳処理をキャンセル"""
+        self.is_cancelled = True
+        logger.info("Apple translation cancellation requested")
+
+    def update_glossary(self, glossary: Dict[str, str]):
+        """用語集を更新"""
+        self.glossary = glossary
+        save_glossary_to_file(self.glossary)
+        logger.info(f"Glossary updated with {len(glossary)} terms")
+
+    def add_glossary_term(self, english: str, japanese: str):
+        """用語を追加"""
+        self.glossary[english] = japanese
+        save_glossary_to_file(self.glossary)
+        logger.info(f"Added glossary term: {english} → {japanese}")
+
+
+# Apple翻訳エンジンのグローバルインスタンス
+_apple_translator = None
+
+
+def get_apple_translator() -> AppleTranslator:
+    """
+    Apple翻訳エンジンのインスタンスを取得
+
+    Returns:
+        Apple翻訳エンジンインスタンス
+    """
+    global _apple_translator
+
+    if _apple_translator is None:
+        _apple_translator = AppleTranslator()
+
+    return _apple_translator

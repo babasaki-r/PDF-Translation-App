@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Translation App - 取扱説明書</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif;
+            background: #1a202c;
+            color: #2d3748;
+            overflow: hidden;
+        }
+
+        .slide-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slide {
+            display: none;
+            width: 100%;
+            height: 100%;
+            padding: 60px 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide.active {
+            display: flex;
+        }
+
+        .slide-content {
+            background: white;
+            border-radius: 20px;
+            padding: 60px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .slide.title-slide .slide-content {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 3em;
+            color: #2d3748;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            font-size: 2.2em;
+            color: #4a5568;
+            margin-bottom: 40px;
+            padding-bottom: 15px;
+            border-bottom: 4px solid #667eea;
+        }
+
+        h3 {
+            font-size: 1.5em;
+            color: #553c9a;
+            margin: 30px 0 15px 0;
+        }
+
+        .subtitle {
+            font-size: 1.5em;
+            color: #718096;
+            margin-bottom: 40px;
+        }
+
+        .version {
+            font-size: 1.2em;
+            color: #a0aec0;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            font-size: 1.3em;
+            padding: 15px 0;
+            padding-left: 40px;
+            position: relative;
+            color: #4a5568;
+        }
+
+        li::before {
+            content: "●";
+            color: #667eea;
+            position: absolute;
+            left: 0;
+            font-size: 0.8em;
+        }
+
+        .step-list li::before {
+            content: counter(step);
+            counter-increment: step;
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+
+        .step-list {
+            counter-reset: step;
+        }
+
+        .code-box {
+            background: #2d3748;
+            color: #68d391;
+            padding: 20px 30px;
+            border-radius: 10px;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 1.1em;
+            margin: 20px 0;
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+        }
+
+        .feature-card {
+            background: #f7fafc;
+            padding: 30px;
+            border-radius: 15px;
+            border-left: 5px solid #667eea;
+        }
+
+        .feature-card h3 {
+            margin-top: 0;
+            color: #2d3748;
+        }
+
+        .feature-card p {
+            color: #718096;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 1.1em;
+        }
+
+        th, td {
+            padding: 15px 20px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:nth-child(even) {
+            background: #f7fafc;
+        }
+
+        .icon-large {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .highlight-box {
+            background: #ebf8ff;
+            border: 2px solid #4299e1;
+            border-radius: 10px;
+            padding: 20px 30px;
+            margin: 20px 0;
+        }
+
+        .highlight-box.warning {
+            background: #fffaf0;
+            border-color: #ed8936;
+        }
+
+        .highlight-box.success {
+            background: #f0fff4;
+            border-color: #48bb78;
+        }
+
+        .screen-layout {
+            background: #2d3748;
+            border-radius: 10px;
+            padding: 20px;
+            color: white;
+            font-family: monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+            white-space: pre;
+        }
+
+        /* ナビゲーション */
+        .navigation {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+        }
+
+        .nav-btn {
+            background: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .nav-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .slide-counter {
+            position: fixed;
+            bottom: 30px;
+            right: 40px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .toc-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .toc-list li {
+            background: #f7fafc;
+            padding: 20px 30px;
+            border-radius: 10px;
+            font-size: 1.2em;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .toc-list li:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .toc-list li::before {
+            content: none;
+        }
+
+        .button-demo {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border-radius: 8px;
+            margin: 5px;
+            font-weight: 600;
+        }
+
+        .button-demo.secondary {
+            background: #718096;
+        }
+
+        .button-demo.success {
+            background: #48bb78;
+        }
+
+        .button-demo.danger {
+            background: #e53e3e;
+        }
+
+        .button-demo.purple {
+            background: #805ad5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .keyboard-hint {
+            position: fixed;
+            bottom: 30px;
+            left: 40px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            color: #718096;
+        }
+
+        kbd {
+            background: #edf2f7;
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 1px solid #cbd5e0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <!-- スライド1: タイトル -->
+        <div class="slide title-slide active">
+            <div class="slide-content">
+                <div class="icon-large">📄</div>
+                <h1>PDF Translation App</h1>
+                <p class="subtitle">取扱説明書</p>
+                <p class="version">Version 1.0.0 | Apple Silicon対応</p>
+            </div>
+        </div>
+
+        <!-- スライド2: 目次 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>目次</h2>
+                <ul class="toc-list">
+                    <li>1. アプリの概要</li>
+                    <li>2. 起動と終了</li>
+                    <li>3. PDFのアップロード</li>
+                    <li>4. 翻訳の実行</li>
+                    <li>5. 画面の操作</li>
+                    <li>6. 用語集機能</li>
+                    <li>7. 質問機能</li>
+                    <li>8. トラブルシューティング</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- スライド3: 概要 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>1. アプリの概要</h2>
+                <div class="two-column">
+                    <div class="feature-card">
+                        <h3>🎯 目的</h3>
+                        <p>英語の技術文書PDFを日本語に翻訳するアプリケーションです。</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🔒 特徴</h3>
+                        <p>ローカルAIで動作するため、機密文書も安心して翻訳できます。</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📚 用語集</h3>
+                        <p>専門用語を登録して、翻訳の一貫性を保てます。</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>❓ 質問機能</h3>
+                        <p>PDFの内容についてAIに質問できます。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- スライド4: 起動と終了 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>2. 起動と終了</h2>
+                <h3>起動方法</h3>
+                <div class="code-box">
+cd ~/PDF_Translation_App
+./start.sh</div>
+                <p style="font-size: 1.2em; color: #718096; margin: 20px 0;">
+                    → 自動的にブラウザが開きます（http://localhost:5173）
+                </p>
+
+                <h3>終了方法</h3>
+                <div class="code-box">./stop.sh</div>
+
+                <div class="highlight-box warning">
+                    <strong>⚠️ 初回起動時の注意</strong><br>
+                    AIモデル（約14GB）をダウンロードするため、10〜30分かかります。
+                </div>
+            </div>
+        </div>
+
+        <!-- スライド5: PDFアップロード -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>3. PDFのアップロード</h2>
+                <ul class="step-list">
+                    <li>画面中央の「ファイルを選択」ボタンをクリック</li>
+                    <li>翻訳したいPDFファイルを選択</li>
+                    <li>PDFが読み込まれ、左側に表示されます</li>
+                </ul>
+                <div class="highlight-box success">
+                    <strong>💡 ヒント</strong><br>
+                    ファイルをドラッグ＆ドロップしてもアップロードできます。
+                </div>
+            </div>
+        </div>
+
+        <!-- スライド6: 翻訳実行 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>4. 翻訳の実行</h2>
+                <ul class="step-list">
+                    <li>PDFアップロード後、<span class="button-demo">翻訳を開始</span> ボタンをクリック</li>
+                    <li>翻訳中は進捗バーが表示されます</li>
+                    <li>完了すると右側に翻訳結果が表示されます</li>
+                </ul>
+
+                <h3>翻訳品質の選択</h3>
+                <table>
+                    <tr>
+                        <th>モード</th>
+                        <th>モデル</th>
+                        <th>特徴</th>
+                    </tr>
+                    <tr>
+                        <td>Fast</td>
+                        <td>Qwen2.5-3B</td>
+                        <td>高速だが品質は控えめ</td>
+                    </tr>
+                    <tr>
+                        <td>Balanced</td>
+                        <td>Qwen2.5-7B</td>
+                        <td>速度と品質のバランス（推奨）</td>
+                    </tr>
+                    <tr>
+                        <td>High</td>
+                        <td>Qwen3-14B</td>
+                        <td>最高品質だが処理時間が長い</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- スライド7: 画面操作 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>5. 画面の操作</h2>
+                <div class="two-column">
+                    <div>
+                        <h3>📄 PDFビューア（左側）</h3>
+                        <ul>
+                            <li><span class="button-demo secondary">← 前へ</span> <span class="button-demo secondary">次へ →</span> でページ移動</li>
+                            <li><span class="button-demo secondary">−</span> <span class="button-demo secondary">+</span> で拡大/縮小</li>
+                            <li><span class="button-demo secondary">リセット</span> で100%に戻す</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3>📝 翻訳パネル（右側）</h3>
+                        <ul>
+                            <li>上部: 英語（原文）を表示</li>
+                            <li>下部: 日本語（翻訳）を表示</li>
+                            <li>ページ移動と連動して切り替わります</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- スライド8: 用語集 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>6. 用語集機能</h2>
+                <p style="font-size: 1.2em; margin-bottom: 30px;">
+                    画面右下の <span class="button-demo success">用語集</span> ボタンをクリックして開きます。
+                </p>
+                <div class="two-column">
+                    <div>
+                        <h3>用語の追加</h3>
+                        <ul>
+                            <li>英語欄に英語の用語を入力</li>
+                            <li>日本語欄に対応する訳語を入力</li>
+                            <li>「追加」ボタンをクリック</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3>その他の機能</h3>
+                        <ul>
+                            <li>🔍 検索バーで用語を検索</li>
+                            <li>↕️ 並び替え（英語/日本語順）</li>
+                            <li>🗑️ 用語の削除</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="highlight-box">
+                    <strong>📌 ポイント</strong><br>
+                    用語集は自動保存され、次回起動時も引き継がれます。<br>
+                    用語集を更新した後は「再翻訳」ボタンで翻訳し直してください。
+                </div>
+            </div>
+        </div>
+
+        <!-- スライド9: 質問機能 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>7. 質問機能</h2>
+                <p style="font-size: 1.2em; margin-bottom: 30px;">
+                    画面右下の <span class="button-demo purple">?</span> ボタンをクリックして開きます。
+                </p>
+                <ul class="step-list">
+                    <li>質問パネルが開きます</li>
+                    <li>質問を入力し、「質問する」ボタンをクリック</li>
+                    <li>AIが回答を生成します（10〜30秒程度）</li>
+                </ul>
+
+                <h3>質問の例</h3>
+                <ul>
+                    <li>「この文書の概要を教えてください」</li>
+                    <li>「〇〇とは何ですか？」</li>
+                    <li>「主な仕様を要約してください」</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- スライド10: トラブルシューティング -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>8. トラブルシューティング</h2>
+                <table>
+                    <tr>
+                        <th style="width: 35%;">症状</th>
+                        <th>対処法</th>
+                    </tr>
+                    <tr>
+                        <td>起動に時間がかかる</td>
+                        <td>初回はモデルダウンロードのため10〜30分かかります。2回目以降は高速です。</td>
+                    </tr>
+                    <tr>
+                        <td>翻訳が遅い</td>
+                        <td>品質モードを「Fast」に変更してください。</td>
+                    </tr>
+                    <tr>
+                        <td>中国語が混じる</td>
+                        <td>「再翻訳」ボタンで翻訳し直してください。</td>
+                    </tr>
+                    <tr>
+                        <td>メモリ不足エラー</td>
+                        <td>「Balanced」モードに変更してください。推奨メモリは16GB以上です。</td>
+                    </tr>
+                    <tr>
+                        <td>PDFが読み込めない</td>
+                        <td>パスワード保護やファイル破損がないか確認してください。</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- スライド11: 画面構成 -->
+        <div class="slide">
+            <div class="slide-content">
+                <h2>画面構成</h2>
+                <div class="screen-layout">
+┌─────────────────────────────────────────────────────────┐
+│  PDF技術文書 翻訳システム          [Qwen2.5-7B] [M4 Pro] │  ← ヘッダー
+├───────────────────────┬─────────────────────────────────┤
+│                       │  品質: [Balanced ▼] [再翻訳]    │  ← コントロール
+│                       ├─────────────────────────────────┤
+│    PDFビューア        │    翻訳結果                     │
+│                       │                                 │
+│  [← 前へ] 1/7 [次へ→] │    英語 (原文)                  │
+│  [−] 100% [+] [リセット]│    ─────────────────────────   │
+│                       │    [原文テキスト]               │
+│    ┌─────────────┐    │                                 │
+│    │             │    │    日本語 (翻訳)                │
+│    │   PDF表示   │    │    ─────────────────────────   │
+│    │             │    │    [翻訳テキスト]               │
+│    └─────────────┘    │                                 │
+├───────────────────────┴─────────────────────────────────┤
+│  [別のファイルを選択]  [翻訳を開始]  ✓ 翻訳完了 (7ページ) │
+└─────────────────────────────────────────────────────────┘
+                                              [用語集] [?]</div>
+            </div>
+        </div>
+
+        <!-- スライド12: 終了 -->
+        <div class="slide title-slide">
+            <div class="slide-content">
+                <div class="icon-large">✅</div>
+                <h1>説明は以上です</h1>
+                <p class="subtitle">ご不明な点があれば、ログファイルをご確認ください</p>
+                <div class="code-box" style="margin-top: 30px;">
+logs/backend.log   - バックエンドのログ
+logs/frontend.log  - フロントエンドのログ</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ナビゲーション -->
+    <div class="navigation">
+        <button class="nav-btn" id="prevBtn" onclick="changeSlide(-1)">← 前へ</button>
+        <button class="nav-btn" id="nextBtn" onclick="changeSlide(1)">次へ →</button>
+    </div>
+
+    <div class="slide-counter">
+        <span id="currentSlide">1</span> / <span id="totalSlides">12</span>
+    </div>
+
+    <div class="keyboard-hint">
+        <kbd>←</kbd> <kbd>→</kbd> または <kbd>Space</kbd> でページ移動
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+
+        document.getElementById('totalSlides').textContent = totalSlides;
+
+        function showSlide(n) {
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            document.getElementById('currentSlide').textContent = currentSlide + 1;
+
+            document.getElementById('prevBtn').disabled = currentSlide === 0;
+            document.getElementById('nextBtn').disabled = currentSlide === totalSlides - 1;
+        }
+
+        function changeSlide(direction) {
+            showSlide(currentSlide + direction);
+        }
+
+        // キーボード操作
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                if (currentSlide < totalSlides - 1) changeSlide(1);
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (currentSlide > 0) changeSlide(-1);
+            }
+        });
+
+        // 初期状態のボタン
+        document.getElementById('prevBtn').disabled = true;
+    </script>
+</body>
+</html>

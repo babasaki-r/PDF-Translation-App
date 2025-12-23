@@ -1,5 +1,10 @@
 {
   "cold rolling line": "冷間圧延ライン",
   "cold rolling": "冷間圧延",
-  "continuous annealing line": "連続焼鈍ライン"
+  "continuous annealing line": "連続焼鈍ライン",
+  "Installation Location:": "設置場所",
+  "Applicable Materials": "適用材料",
+  "Welding": "溶接",
+  "Pressure force": "押さえ圧力",
+  "online thermal control": "オンライン熱制御"
 }

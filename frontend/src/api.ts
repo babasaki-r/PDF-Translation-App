@@ -100,22 +100,32 @@ export const updateGlossary = async (glossary: Record<string, string>): Promise<
   return response.data;
 };
 
-// 校正
-export const proofreadTranslation = async (
-  original: string,
-  translated: string,
-  page?: number
-): Promise<{
+// PDFの内容について質問
+export const askQuestion = async (question: string, context: string): Promise<{
   success: boolean;
-  page?: number;
-  has_issues: boolean;
-  corrected_text: string;
-  issues: Array<{ type: string; description: string; suggestion: string }>;
+  question: string;
+  answer: string;
 }> => {
-  const response = await api.post('/api/proofread', {
-    original,
-    translated,
-    page,
+  const response = await api.post('/api/ask', { question, context });
+  return response.data;
+};
+
+// Apple翻訳（軽量翻訳）
+export const translatePagesApple = async (pages: PageData[]): Promise<TranslationResponse> => {
+  const response = await api.post<TranslationResponse>('/api/translate/apple', {
+    pages,
   });
+  return response.data;
+};
+
+// Apple翻訳の進捗確認
+export const getAppleProgress = async (): Promise<ProgressInfo> => {
+  const response = await api.get<ProgressInfo>('/api/translate/apple/progress');
+  return response.data;
+};
+
+// Apple翻訳キャンセル
+export const cancelAppleTranslation = async (): Promise<{ success: boolean; message: string }> => {
+  const response = await api.post('/api/translate/apple/cancel');
   return response.data;
 };

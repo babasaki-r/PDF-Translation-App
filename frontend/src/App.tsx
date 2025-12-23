@@ -4,7 +4,8 @@ import PdfViewer from './components/PdfViewer';
 import TranslationPanel from './components/TranslationPanel';
 import ControlPanel from './components/ControlPanel';
 import GlossaryPanel from './components/GlossaryPanel';
-import { uploadPDF, translatePages, getProgress, cancelTranslation } from './api';
+import QuestionPanel from './components/QuestionPanel';
+import { uploadPDF, translatePages, getProgress, cancelTranslation, translatePagesApple, getAppleProgress, cancelAppleTranslation } from './api';
 import { PageData, TranslatedPage } from './types';
 
 function App() {
@@ -15,13 +16,15 @@ function App() {
   const [pagesData, setPagesData] = useState<PageData[]>([]);
   const [translatedPages, setTranslatedPages] = useState<TranslatedPage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedQuality, setSelectedQuality] = useState('balanced');
+  const [selectedQuality, setSelectedQuality] = useState('fast');
   const [translationProgress, setTranslationProgress] = useState<{
     current: number;
     total: number;
     percentage: number;
   } | null>(null);
   const progressIntervalRef = useRef<number | null>(null);
+  const [showQuestionPanel, setShowQuestionPanel] = useState(false);
+  const [translationEngine, setTranslationEngine] = useState<'llm' | 'apple'>('llm');
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
@@ -47,10 +50,12 @@ function App() {
   // 進捗ポーリング
   useEffect(() => {
     if (isTranslating) {
-      // 進捗を定期的に取得
+      // 進捗を定期的に取得（エンジンに応じて異なるAPIを呼び出す）
       progressIntervalRef.current = window.setInterval(async () => {
         try {
-          const progress = await getProgress();
+          const progress = translationEngine === 'apple'
+            ? await getAppleProgress()
+            : await getProgress();
           setTranslationProgress(progress.progress);
         } catch (error) {
           console.error('Failed to get progress:', error);
@@ -69,7 +74,7 @@ function App() {
         clearInterval(progressIntervalRef.current);
       }
     };
-  }, [isTranslating]);
+  }, [isTranslating, translationEngine]);
 
   const handleTranslate = async () => {
     if (pagesData.length === 0) {
@@ -80,9 +85,15 @@ function App() {
     setError(null);
 
     try {
-      const response = await translatePages(pagesData, selectedQuality);
+      let response;
+      if (translationEngine === 'apple') {
+        response = await translatePagesApple(pagesData);
+        console.log('Translation completed with Apple translator');
+      } else {
+        response = await translatePages(pagesData, selectedQuality);
+        console.log('Translation completed with quality:', selectedQuality);
+      }
       setTranslatedPages(response.pages);
-      console.log('Translation completed with quality:', selectedQuality);
     } catch (err) {
       console.error('Translation error:', err);
       setError('翻訳に失敗しました。バックエンドが起動しているか確認してください。');
@@ -93,7 +104,11 @@ function App() {
 
   const handleCancelTranslation = async () => {
     try {
-      await cancelTranslation();
+      if (translationEngine === 'apple') {
+        await cancelAppleTranslation();
+      } else {
+        await cancelTranslation();
+      }
       setIsTranslating(false);
       setError('翻訳を中断しました');
     } catch (err) {
@@ -111,7 +126,8 @@ function App() {
       return;
     }
 
-    if (!window.confirm(`現在の品質設定(${selectedQuality})で再翻訳しますか？`)) {
+    const engineName = translationEngine === 'apple' ? '軽量翻訳' : `LLM(${selectedQuality})`;
+    if (!window.confirm(`現在の設定(${engineName})で再翻訳しますか？`)) {
       return;
     }
 
@@ -120,9 +136,14 @@ function App() {
     setTranslatedPages([]); // 既存の翻訳をクリア
 
     try {
-      const response = await translatePages(pagesData, selectedQuality);
+      let response;
+      if (translationEngine === 'apple') {
+        response = await translatePagesApple(pagesData);
+      } else {
+        response = await translatePages(pagesData, selectedQuality);
+      }
       setTranslatedPages(response.pages);
-      console.log('Re-translation completed with quality:', selectedQuality);
+      console.log('Re-translation completed');
     } catch (err) {
       console.error('Re-translation error:', err);
       setError('再翻訳に失敗しました。');
@@ -137,8 +158,31 @@ function App() {
       <header style={styles.header}>
         <h1 style={styles.headerTitle}>PDF技術文書 翻訳システム</h1>
         <div style={styles.headerInfo}>
-          <span style={styles.badge}>{selectedQuality === 'high' ? 'Qwen3-14B' : selectedQuality === 'balanced' ? 'Qwen2.5-7B' : 'Qwen2.5-3B'}</span>
-          <span style={styles.badge}>M4 Pro Optimized</span>
+          {/* 翻訳エンジン選択 */}
+          <select
+            value={translationEngine}
+            onChange={(e) => setTranslationEngine(e.target.value as 'llm' | 'apple')}
+            style={styles.engineSelect}
+            disabled={isTranslating}
+          >
+            <option value="llm">LLM翻訳</option>
+            <option value="apple">軽量翻訳</option>
+          </select>
+          {translationEngine === 'llm' && (
+            <span style={styles.badge}>
+              {selectedQuality === 'high' ? 'Qwen3-14B' : selectedQuality === 'balanced' ? 'Qwen2.5-7B' : 'Qwen2.5-3B'}
+            </span>
+          )}
+          {translationEngine === 'apple' && (
+            <span style={{...styles.badge, backgroundColor: '#38a169'}}>Apple翻訳</span>
+          )}
+          <button
+            onClick={() => window.open('/docs/manual-slides.html', '_blank')}
+            style={styles.helpButton}
+            title="ヘルプを開く"
+          >
+            ヘルプ
+          </button>
         </div>
       </header>
 
@@ -230,6 +274,24 @@ function App() {
 
       {/* 用語集パネル */}
       <GlossaryPanel />
+
+      {/* 質問ボタン */}
+      {pagesData.length > 0 && (
+        <button
+          onClick={() => setShowQuestionPanel(true)}
+          style={styles.questionButton}
+          title="PDFの内容について質問"
+        >
+          ?
+        </button>
+      )}
+
+      {/* 質問パネル */}
+      <QuestionPanel
+        pdfContent={pagesData.map(p => p.text).join('\n\n')}
+        isVisible={showQuestionPanel}
+        onClose={() => setShowQuestionPanel(false)}
+      />
 
       {/* エラー表示 */}
       {error && (
@@ -358,6 +420,44 @@ const styles = {
     boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
     maxWidth: '400px',
     zIndex: 1100,
+  } as React.CSSProperties,
+  questionButton: {
+    position: 'fixed' as const,
+    bottom: '100px',
+    right: '30px',
+    width: '50px',
+    height: '50px',
+    borderRadius: '50%',
+    backgroundColor: '#805ad5',
+    color: 'white',
+    border: 'none',
+    fontSize: '24px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(128, 90, 213, 0.4)',
+    transition: 'all 0.2s',
+    zIndex: 900,
+  } as React.CSSProperties,
+  helpButton: {
+    padding: '4px 12px',
+    backgroundColor: '#48bb78',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '12px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    transition: 'background-color 0.2s',
+  } as React.CSSProperties,
+  engineSelect: {
+    padding: '4px 8px',
+    backgroundColor: '#4a5568',
+    color: 'white',
+    border: '1px solid #718096',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
   } as React.CSSProperties,
 };
 

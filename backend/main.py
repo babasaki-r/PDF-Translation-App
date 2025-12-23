@@ -9,7 +9,7 @@ import io
 from datetime import datetime
 
 from pdf_processor import PDFProcessor, PDFTextMerger
-from translator import get_translator, set_quality
+from translator import get_translator, set_quality, get_apple_translator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -477,53 +477,142 @@ async def get_glossary():
         raise HTTPException(status_code=500, detail=f"Glossary get error: {str(e)}")
 
 
-@app.post("/api/proofread")
-async def proofread_translation(data: Dict):
+@app.post("/api/ask")
+async def ask_question(data: Dict):
     """
-    翻訳の校正を実行
+    PDFの内容についてAIに質問する
 
     Args:
         data: {
-            "original": "原文",
-            "translated": "翻訳文",
-            "page": ページ番号（オプション）
+            "question": "質問テキスト",
+            "context": "PDFのテキスト内容"
         }
 
     Returns:
-        校正結果
+        AIからの回答
     """
     try:
-        original = data.get("original", "")
-        translated = data.get("translated", "")
-        page = data.get("page", None)
+        question = data.get("question", "")
+        context = data.get("context", "")
 
-        if not original or not translated:
-            raise HTTPException(status_code=400, detail="Both original and translated text are required")
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
 
-        logger.info(f"Proofreading translation for page {page}...")
+        if not context:
+            raise HTTPException(status_code=400, detail="Context (PDF content) is required")
+
+        logger.info(f"Answering question: {question[:50]}...")
 
         translator = get_translator()
 
-        # 非同期で校正実行
+        # 非同期で質問回答を実行
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
+        answer = await loop.run_in_executor(
             None,
-            translator.proofread_translation,
-            original,
-            translated
+            translator.ask_question,
+            question,
+            context
         )
 
         return JSONResponse({
             "success": True,
-            "page": page,
-            "has_issues": result["has_issues"],
-            "corrected_text": result["corrected_text"],
-            "issues": result["issues"]
+            "question": question,
+            "answer": answer
         })
 
     except Exception as e:
-        logger.error(f"Proofread error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Proofread error: {str(e)}")
+        logger.error(f"Question error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Question error: {str(e)}")
+
+
+@app.post("/api/translate/apple")
+async def translate_pages_apple(data: Dict):
+    """
+    Apple翻訳（Google翻訳API）を使用したページ翻訳
+    LLMを使用せず軽量に翻訳を行う
+
+    Args:
+        data: {
+            "pages": [ページデータのリスト]
+        }
+
+    Returns:
+        翻訳されたページデータ
+    """
+    try:
+        pages_data = data.get("pages", [])
+
+        if not pages_data:
+            raise HTTPException(status_code=400, detail="Pages data is required")
+
+        logger.info(f"[Apple] Translating {len(pages_data)} pages...")
+
+        translator = get_apple_translator()
+
+        # 翻訳処理（非同期で実行）
+        loop = asyncio.get_event_loop()
+        translated_pages = await loop.run_in_executor(
+            None,
+            translator.translate_pages,
+            pages_data
+        )
+
+        # オリジナルと翻訳をマージ
+        merged_data = PDFTextMerger.merge_translations(pages_data, translated_pages)
+
+        return JSONResponse({
+            "success": True,
+            "pages": merged_data,
+            "engine": "apple"
+        })
+
+    except Exception as e:
+        logger.error(f"Apple translation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Apple translation error: {str(e)}")
+
+
+@app.get("/api/translate/apple/progress")
+async def get_apple_translation_progress():
+    """
+    Apple翻訳の進捗状況を取得
+
+    Returns:
+        進捗情報
+    """
+    try:
+        translator = get_apple_translator()
+        progress = translator.get_progress()
+
+        return JSONResponse({
+            "success": True,
+            "progress": progress
+        })
+
+    except Exception as e:
+        logger.error(f"Apple progress error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Progress error: {str(e)}")
+
+
+@app.post("/api/translate/apple/cancel")
+async def cancel_apple_translation():
+    """
+    Apple翻訳処理をキャンセル
+
+    Returns:
+        キャンセル結果
+    """
+    try:
+        translator = get_apple_translator()
+        translator.cancel_translation()
+
+        return JSONResponse({
+            "success": True,
+            "message": "Apple translation cancellation requested"
+        })
+
+    except Exception as e:
+        logger.error(f"Apple cancel error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cancel error: {str(e)}")
 
 
 def _generate_text_file(pages_data: List[Dict], format_type: str) -> str:

@@ -1,41 +1,16 @@
 export interface PageData {
   page: number;
   text: string;
-  sections: Section[];
-  tables: any[];
-  metadata: {
-    width: number;
-    height: number;
-    has_tables: boolean;
-  };
-}
-
-export interface Section {
-  text: string;
-  metadata: {
-    index: number;
-    is_heading: boolean;
-    is_list: boolean;
-    length: number;
-  };
 }
 
 export interface TranslatedPage {
   page: number;
   original: {
     text: string;
-    sections: Section[];
   };
   translated: {
     text: string;
-    sections: Array<{
-      original: string;
-      translated: string;
-      metadata: any;
-    }>;
   };
-  metadata: any;
-  tables: any[];
 }
 
 export interface PDFInfo {
