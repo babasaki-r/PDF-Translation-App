@@ -1,48 +1,74 @@
 import React, { useState, useEffect } from 'react';
-import { getQualityInfo, downloadTranslation } from '../api';
-import { TranslatedPage, QualityInfo } from '../types';
+import { downloadTranslation, OllamaModel, getDocumentTypes, SwallowStatus, OllamaStatus } from '../api';
+import { TranslatedPage, TranslationDirection, DocumentType, DocumentTypeInfo } from '../types';
 
 interface ControlPanelProps {
   translatedPages: TranslatedPage[];
   currentPage: number;
-  onQualityChange: (quality: string) => void;
-  selectedQuality: string;
   translationProgress?: {
     current: number;
     total: number;
     percentage: number;
   } | null;
   isTranslating: boolean;
-  onRetranslate?: () => void;
+  translationEngine: 'ollama' | 'swallow' | 'apple';
+  onEngineChange: (engine: 'ollama' | 'swallow' | 'apple') => void;
+  translationDirection: TranslationDirection;
+  onDirectionChange: (direction: TranslationDirection) => void;
+  ollamaModels: OllamaModel[];
+  selectedOllamaModel: string;
+  onOllamaModelChange: (model: string) => void;
+  documentType: DocumentType;
+  onDocumentTypeChange: (type: DocumentType) => void;
+  swallowStatus?: SwallowStatus | null;
+  ollamaStatus?: OllamaStatus | null;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({
   translatedPages,
   currentPage,
-  onQualityChange,
-  selectedQuality,
   translationProgress,
   isTranslating,
-  onRetranslate,
+  translationEngine,
+  onEngineChange,
+  translationDirection,
+  onDirectionChange,
+  ollamaModels,
+  selectedOllamaModel,
+  onOllamaModelChange,
+  documentType,
+  onDocumentTypeChange,
+  swallowStatus,
+  ollamaStatus,
 }) => {
-  const [qualityInfo, setQualityInfo] = useState<QualityInfo | null>(null);
   const [downloadFormat, setDownloadFormat] = useState<'original' | 'translated' | 'both'>('both');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isQualityExpanded, setIsQualityExpanded] = useState(false);
   const [isDownloadExpanded, setIsDownloadExpanded] = useState(false);
+  const [documentTypes, setDocumentTypes] = useState<DocumentTypeInfo[]>([]);
 
+  // 文書タイプ一覧を取得
   useEffect(() => {
-    loadQualityInfo();
+    const fetchDocumentTypes = async () => {
+      try {
+        const response = await getDocumentTypes();
+        if (response.success && response.document_types.length > 0) {
+          setDocumentTypes(response.document_types);
+        }
+      } catch (error) {
+        console.log('Failed to fetch document types:', error);
+        // フォールバック
+        setDocumentTypes([
+          { id: 'steel_technical', name: '鉄鋼業における技術文書', description: '鉄鋼業界の設備仕様書・技術文書向け' },
+          { id: 'general_technical', name: '一般的な技術文書', description: 'IT・機械・電気など一般的な技術文書向け' },
+          { id: 'academic_paper', name: '技術論文', description: '学術論文・研究報告書向け' },
+          { id: 'contract', name: '契約書', description: '契約書・法的文書向け' },
+          { id: 'general_document', name: '一般的な文書', description: '新聞・記事・ブログ・一般的な文書向け' },
+          { id: 'order_acceptance', name: '注文書・検収書', description: '注文書・発注書・検収書・納品書向け' },
+        ]);
+      }
+    };
+    fetchDocumentTypes();
   }, []);
-
-  const loadQualityInfo = async () => {
-    try {
-      const info = await getQualityInfo();
-      setQualityInfo(info);
-    } catch (error) {
-      console.error('Failed to load quality info:', error);
-    }
-  };
 
   const handleDownload = async (type: 'all' | 'current') => {
     if (translatedPages.length === 0) return;
@@ -59,7 +85,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     setIsDownloading(true);
     try {
       const pageNumbers = type === 'current' ? [currentPage] : undefined;
-      const blob = await downloadTranslation(translatedPages, downloadFormat, pageNumbers);
+      const blob = await downloadTranslation(
+        translatedPages,
+        downloadFormat,
+        pageNumbers,
+        documentType,
+        translationEngine,
+        selectedOllamaModel
+      );
 
       // ダウンロード処理
       const url = window.URL.createObjectURL(blob);
@@ -80,56 +113,186 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
+  // エンジン表示名を取得
+  const getEngineDisplayName = () => {
+    switch (translationEngine) {
+      case 'ollama':
+        return `Ollama (${selectedOllamaModel})`;
+      case 'swallow':
+        return 'Swallow (Llama-3.1-8B)';
+      case 'apple':
+        return 'Apple翻訳';
+      default:
+        return 'Ollama';
+    }
+  };
+
   return (
     <div style={styles.container}>
-      {/* 品質選択（折りたたみ可能） */}
-      <div style={styles.section}>
-        <div
-          style={styles.sectionHeader}
-          onClick={() => setIsQualityExpanded(!isQualityExpanded)}
-        >
-          <h3 style={styles.sectionTitle}>
-            {isQualityExpanded ? '▼' : '▶'} 翻訳品質設定
-          </h3>
-          <span style={styles.currentSelection}>
-            現在: {selectedQuality === 'high' ? '高品質' : selectedQuality === 'balanced' ? 'バランス' : '高速'}
-          </span>
+      {/* 翻訳設定セクション（常に表示） */}
+      <div style={styles.settingsSection}>
+        {/* 翻訳方向選択 */}
+        <div style={styles.settingRow}>
+          <label style={styles.settingLabel}>翻訳方向:</label>
+          <div style={styles.directionButtons}>
+            <button
+              onClick={() => onDirectionChange('en-to-ja')}
+              style={{
+                ...styles.directionButton,
+                ...(translationDirection === 'en-to-ja' ? styles.directionButtonActive : {}),
+              }}
+              disabled={isTranslating}
+            >
+              英語 → 日本語
+            </button>
+            <button
+              onClick={() => onDirectionChange('ja-to-en')}
+              style={{
+                ...styles.directionButton,
+                ...(translationDirection === 'ja-to-en' ? styles.directionButtonActive : {}),
+              }}
+              disabled={isTranslating}
+            >
+              日本語 → 英語
+            </button>
+          </div>
         </div>
-        {isQualityExpanded && (
-          <div style={styles.expandedContent}>
-            <div style={styles.qualityButtons}>
-              {qualityInfo && Object.entries(qualityInfo.options).map(([key, option]) => (
-                <button
-                  key={key}
-                  onClick={() => onQualityChange(key)}
-                  style={{
-                    ...styles.qualityButton,
-                    ...(selectedQuality === key ? styles.qualityButtonActive : {}),
-                  }}
-                  disabled={isTranslating}
-                >
-                  <div style={styles.qualityLabel}>{option.description}</div>
-                  <div style={styles.qualityDetails}>
-                    速度: {option.speed} | 品質: {option.quality}
-                  </div>
-                </button>
-              ))}
+
+        {/* 翻訳エンジン選択 */}
+        <div style={styles.settingRow}>
+          <label style={styles.settingLabel}>翻訳エンジン:</label>
+          <div style={styles.engineButtons}>
+            <button
+              onClick={() => onEngineChange('ollama')}
+              style={{
+                ...styles.engineButton,
+                ...(translationEngine === 'ollama' ? styles.engineButtonOllamaActive : {}),
+              }}
+              disabled={isTranslating}
+            >
+              バランス
+            </button>
+            <button
+              onClick={() => onEngineChange('swallow')}
+              style={{
+                ...styles.engineButton,
+                ...(translationEngine === 'swallow' ? styles.engineButtonSwallowActive : {}),
+              }}
+              disabled={isTranslating}
+            >
+              日本語重視
+            </button>
+            <button
+              onClick={() => onEngineChange('apple')}
+              style={{
+                ...styles.engineButton,
+                ...(translationEngine === 'apple' ? styles.engineButtonAppleActive : {}),
+              }}
+              disabled={isTranslating}
+            >
+              簡易翻訳
+            </button>
+          </div>
+        </div>
+
+        {/* Ollama接続状態（Ollama選択時のみ表示） */}
+        {translationEngine === 'ollama' && ollamaStatus && (
+          <div style={styles.settingRow}>
+            <label style={styles.settingLabel}>状態:</label>
+            <div style={styles.swallowStatusContainer}>
+              {ollamaStatus.available ? (
+                <div style={styles.ollamaStatusReady}>
+                  <span>✓</span>
+                  <span>接続OK ({ollamaStatus.current_model})</span>
+                </div>
+              ) : (
+                <div style={styles.ollamaStatusError}>
+                  <span>✗</span>
+                  <span>Ollamaに接続できません (ollama serve を実行してください)</span>
+                </div>
+              )}
             </div>
-            {/* 再翻訳ボタン */}
-            {translatedPages.length > 0 && onRetranslate && (
-              <button
-                onClick={onRetranslate}
-                style={styles.retranslateButton}
-                disabled={isTranslating}
-              >
-                🔄 現在の品質設定で再翻訳
-              </button>
-            )}
           </div>
         )}
+
+        {/* Swallowロード状態（Swallow選択時のみ表示） */}
+        {translationEngine === 'swallow' && swallowStatus && (
+          <div style={styles.settingRow}>
+            <label style={styles.settingLabel}>状態:</label>
+            <div style={styles.swallowStatusContainer}>
+              {swallowStatus.loading ? (
+                <div style={styles.swallowStatusLoading}>
+                  <span style={styles.loadingSpinner}>⏳</span>
+                  <span>モデルをロード中... (初回は数分かかります)</span>
+                </div>
+              ) : swallowStatus.loaded ? (
+                <div style={styles.swallowStatusReady}>
+                  <span>✓</span>
+                  <span>準備完了</span>
+                </div>
+              ) : swallowStatus.error ? (
+                <div style={styles.swallowStatusError}>
+                  <span>✗</span>
+                  <span>エラー: {swallowStatus.error}</span>
+                </div>
+              ) : (
+                <div style={styles.swallowStatusNotLoaded}>
+                  <span>○</span>
+                  <span>未ロード (翻訳開始時にロードされます)</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Ollamaモデル選択（Ollama選択時のみ表示） */}
+        {translationEngine === 'ollama' && ollamaModels.length > 0 && (
+          <div style={styles.settingRow}>
+            <label style={styles.settingLabel}>モデル:</label>
+            <select
+              value={selectedOllamaModel}
+              onChange={(e) => onOllamaModelChange(e.target.value)}
+              style={styles.modelSelect}
+              disabled={isTranslating}
+            >
+              {ollamaModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.size})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* 文書タイプ選択（簡易翻訳以外のみ表示） */}
+        {translationEngine !== 'apple' && (
+          <div style={styles.settingRow}>
+            <label style={styles.settingLabel}>文書タイプ:</label>
+            <select
+              value={documentType}
+              onChange={(e) => onDocumentTypeChange(e.target.value as DocumentType)}
+              style={styles.documentTypeSelect}
+              disabled={isTranslating}
+            >
+              {documentTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* 現在の設定表示 */}
+        <div style={styles.currentSettings}>
+          <span style={styles.currentSettingsLabel}>現在の設定:</span>
+          <span style={styles.currentSettingsValue}>
+            {translationDirection === 'en-to-ja' ? '英→日' : '日→英'} / {getEngineDisplayName()}
+          </span>
+        </div>
       </div>
 
-      {/* 翻訳進捗（折りたたみ不可、常に表示） */}
+      {/* 翻訳進捗（翻訳中のみ表示） */}
       {isTranslating && translationProgress && (
         <div style={styles.section}>
           <div style={styles.progressContainer}>
@@ -149,7 +312,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       )}
 
-      {/* ダウンロード（折りたたみ可能） */}
+      {/* ダウンロード（折りたたみ可能、翻訳完了後のみ表示） */}
       {translatedPages.length > 0 && !isTranslating && (
         <div style={styles.section}>
           <div
@@ -206,14 +369,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   style={styles.downloadButton}
                   disabled={isDownloading}
                 >
-                  📄 現在のページ
+                  現在のページ
                 </button>
                 <button
                   onClick={() => handleDownload('all')}
                   style={styles.downloadButtonPrimary}
                   disabled={isDownloading}
                 >
-                  📚 全ページ ({translatedPages.length}ページ)
+                  全ページ ({translatedPages.length}ページ)
                 </button>
               </div>
             </div>
@@ -228,8 +391,219 @@ const styles = {
   container: {
     padding: '12px',
     backgroundColor: '#f8f9fa',
+    borderBottom: '1px solid #e2e8f0',
+  } as React.CSSProperties,
+  settingsSection: {
+    padding: '12px',
+    backgroundColor: 'white',
     borderRadius: '8px',
+    border: '1px solid #e2e8f0',
     marginBottom: '12px',
+  } as React.CSSProperties,
+  settingRow: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: '12px',
+    gap: '12px',
+  } as React.CSSProperties,
+  settingLabel: {
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#4a5568',
+    minWidth: '80px',
+  } as React.CSSProperties,
+  directionButtons: {
+    display: 'flex',
+    gap: '8px',
+    flex: 1,
+  } as React.CSSProperties,
+  directionButton: {
+    flex: 1,
+    padding: '8px 12px',
+    backgroundColor: 'white',
+    border: '2px solid #e2e8f0',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    color: '#4a5568',
+  } as React.CSSProperties,
+  directionButtonActive: {
+    borderColor: '#2b6cb0',
+    backgroundColor: '#ebf8ff',
+    color: '#2b6cb0',
+  } as React.CSSProperties,
+  engineButtons: {
+    display: 'flex',
+    gap: '8px',
+    flex: 1,
+  } as React.CSSProperties,
+  engineButton: {
+    flex: 1,
+    padding: '8px 12px',
+    backgroundColor: 'white',
+    border: '2px solid #e2e8f0',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    color: '#4a5568',
+  } as React.CSSProperties,
+  engineButtonOllamaActive: {
+    borderColor: '#805ad5',
+    backgroundColor: '#faf5ff',
+    color: '#805ad5',
+  } as React.CSSProperties,
+  engineButtonSwallowActive: {
+    borderColor: '#e53e3e',
+    backgroundColor: '#fff5f5',
+    color: '#e53e3e',
+  } as React.CSSProperties,
+  engineButtonAppleActive: {
+    borderColor: '#38a169',
+    backgroundColor: '#f0fff4',
+    color: '#38a169',
+  } as React.CSSProperties,
+  modelSelect: {
+    flex: 1,
+    padding: '8px 12px',
+    backgroundColor: 'white',
+    border: '2px solid #805ad5',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    color: '#553c9a',
+  } as React.CSSProperties,
+  documentTypeSelect: {
+    flex: 1,
+    padding: '8px 12px',
+    backgroundColor: 'white',
+    border: '2px solid #dd6b20',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    color: '#c05621',
+  } as React.CSSProperties,
+  swallowStatusContainer: {
+    flex: 1,
+  } as React.CSSProperties,
+  ollamaStatusReady: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#e9d8fd',
+    border: '2px solid #805ad5',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#553c9a',
+  } as React.CSSProperties,
+  ollamaStatusError: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#fed7d7',
+    border: '2px solid #e53e3e',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#c53030',
+  } as React.CSSProperties,
+  swallowStatusLoading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#fefcbf',
+    border: '2px solid #d69e2e',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#744210',
+  } as React.CSSProperties,
+  swallowStatusReady: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#c6f6d5',
+    border: '2px solid #38a169',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#276749',
+  } as React.CSSProperties,
+  swallowStatusError: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#fed7d7',
+    border: '2px solid #e53e3e',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#c53030',
+  } as React.CSSProperties,
+  swallowStatusNotLoaded: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#e2e8f0',
+    border: '2px solid #a0aec0',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#4a5568',
+  } as React.CSSProperties,
+  loadingSpinner: {
+    display: 'inline-block',
+    animation: 'spin 1s linear infinite',
+  } as React.CSSProperties,
+  documentTypeDisplay: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '10px 12px',
+    backgroundColor: '#fffaf0',
+    borderRadius: '6px',
+    marginBottom: '8px',
+    border: '1px solid #fbd38d',
+  } as React.CSSProperties,
+  documentTypeLabel: {
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#c05621',
+  } as React.CSSProperties,
+  documentTypeValue: {
+    fontSize: '14px',
+    fontWeight: 'bold' as const,
+    color: '#744210',
+  } as React.CSSProperties,
+  currentSettings: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#f7fafc',
+    borderRadius: '6px',
+    marginTop: '4px',
+  } as React.CSSProperties,
+  currentSettingsLabel: {
+    fontSize: '12px',
+    color: '#718096',
+  } as React.CSSProperties,
+  currentSettingsValue: {
+    fontSize: '13px',
+    fontWeight: 'bold' as const,
+    color: '#2d3748',
   } as React.CSSProperties,
   section: {
     marginBottom: '12px',
@@ -264,35 +638,8 @@ const styles = {
     borderRadius: '6px',
     border: '1px solid #e2e8f0',
   } as React.CSSProperties,
-  qualityButtons: {
-    display: 'flex',
-    gap: '12px',
-  } as React.CSSProperties,
-  qualityButton: {
-    flex: 1,
-    padding: '12px',
-    backgroundColor: 'white',
-    border: '2px solid #e2e8f0',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    textAlign: 'left' as const,
-  } as React.CSSProperties,
-  qualityButtonActive: {
-    borderColor: '#3182ce',
-    backgroundColor: '#ebf8ff',
-  } as React.CSSProperties,
-  qualityLabel: {
-    fontWeight: 'bold' as const,
-    fontSize: '14px',
-    marginBottom: '4px',
-  } as React.CSSProperties,
-  qualityDetails: {
-    fontSize: '12px',
-    color: '#718096',
-  } as React.CSSProperties,
   progressContainer: {
-    padding: '8px 12px',
+    padding: '12px',
     backgroundColor: 'white',
     borderRadius: '6px',
     border: '1px solid #e2e8f0',
@@ -327,7 +674,7 @@ const styles = {
     gap: '16px',
     marginBottom: '12px',
     padding: '12px',
-    backgroundColor: 'white',
+    backgroundColor: '#f7fafc',
     borderRadius: '8px',
   } as React.CSSProperties,
   formatLabel: {
@@ -360,20 +707,6 @@ const styles = {
     flex: 1,
     padding: '12px 20px',
     backgroundColor: '#3182ce',
-    border: 'none',
-    color: 'white',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 'bold' as const,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-  } as React.CSSProperties,
-  retranslateButton: {
-    width: '100%',
-    marginTop: '12px',
-    padding: '12px 20px',
-    backgroundColor: '#805ad5',
     border: 'none',
     color: 'white',
     borderRadius: '8px',

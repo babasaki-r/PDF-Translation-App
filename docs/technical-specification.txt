@@ -1,0 +1,494 @@
+
+
+
+
+PDF翻訳システム - 技術仕様書
+
+
+
+PDF翻訳システム - 技術仕様書
+バージョン: 2.2.0
+最終更新: 2026-01-14
+対象読者: 開発者・技術者
+横罫線
+目次
+テキストファイルのアイコン1. 概要
+テキストファイルのアイコン2. システムアーキテクチャ
+テキストファイルのアイコン3. 技術スタック
+テキストファイルのアイコン4. API仕様
+テキストファイルのアイコン5. データモデル
+テキストファイルのアイコン6. バックエンド設計
+テキストファイルのアイコン7. フロントエンド設計
+テキストファイルのアイコン8. 翻訳エンジン設計
+テキストファイルのアイコン9. パフォーマンス最適化
+テキストファイルのアイコン10. セキュリティ設計
+テキストファイルのアイコン11. 設定・環境変数
+テキストファイルのアイコン12. ディレクトリ構造
+テキストファイルのアイコン13. デプロイ構成
+テキストファイルのアイコン14. システム要件
+テキストファイルのアイコン15. 既知の制限事項
+横罫線
+1. 概要
+PDF翻訳システム は、Apple Silicon Mac専用のローカルAI翻訳アプリケーションです。PDFファイル（技術仕様書など）を自動的に翻訳し、すべての処理をローカル環境で完結させることで、プライバシーとセキュリティを最優先します。
+主要機能
+PDF解析: PyMuPDF/pdfplumberによる高精度なテキスト・レイアウト抽出
+マルチエンジン翻訳: バランス(Ollama)、日本語重視(Swallow)、簡易翻訳(Apple)の3種類から選択可能
+文書タイプ選択: 技術文書、論文、契約書など6種類の文書タイプに応じた最適なプロンプト
+双方向翻訳: 英日・日英の双方向翻訳に対応
+用語集機能: カスタム用語集による一貫した翻訳
+進捗表示: リアルタイム翻訳進捗の可視化
+PDFビューア: 原文と翻訳文の並列表示
+ダウンロード: 翻訳結果のテキストファイル出力（文書タイプ・翻訳エンジン情報付き）
+質問応答: 翻訳内容に対するAI質問機能
+横罫線
+2. システムアーキテクチャ
+全体構成図
+┌─────────────────────────────────────────────────────────────┐
+│                      Browser (SPA)                           │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │         React Frontend (TypeScript + Vite)            │  │
+│  │  - FileUpload / PdfViewer                             │  │
+│  │  - TranslationPanel / ControlPanel                    │  │
+│  │  - GlossaryPanel / QuestionPanel                      │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           ↓ HTTP API                         │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│                  FastAPI Backend (Python)                    │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  API Routes (FastAPI Router)                          │  │
+│  │  - /api/pdf/upload, /api/translate/pages              │  │
+│  │  - /api/ollama/*, /api/swallow/*, /api/apple/*        │  │
+│  │  - /api/glossary/*, /api/question                     │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                           ↓                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  Services                                              │  │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐     │  │
+│  │  │OllamaTranslator│SwallowTranslator│AppleTranslator│  │
+│  │  │  (Ollama)   │ │ (PyTorch)   │ │  (Swift)    │     │  │
+│  │  └─────────────┘ └─────────────┘ └─────────────┘     │  │
+│  │  ┌─────────────┐ ┌─────────────┐                      │  │
+│  │  │PDFProcessor │ │GlossaryService│                   │  │
+│  │  │ (PyMuPDF)   │ │ (JSON)      │                      │  │
+│  │  └─────────────┘ └─────────────┘                      │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+        ┌───────────────────┴───────────────────┐
+        ↓                   ↓                   ↓
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│  Ollama       │  │  Swallow      │  │ Apple         │
+│  qwen3:4b     │  │  Llama-3.1    │  │ Translation   │
+│  -instruct    │  │  Swallow-8B   │  │ Framework     │
+└───────────────┘  └───────────────┘  └───────────────┘
+データフロー
+1. PDFアップロード → 翻訳フロー
+Upload (Client)
+  ↓ multipart/form-data
+POST /api/pdf/upload (Backend)
+  ↓
+PDFProcessor.extract_text_from_pdf()
+  ├─ PyMuPDF: ページごとのテキスト抽出
+  ├─ Layout analysis: 座標・フォント情報
+  └─ Output: JSON [{page, text, blocks[]}]
+  ↓
+Response {
+  success: true,
+  filename: "document.pdf",
+  info: {num_pages, title, author},
+  pages: [{page, text}],
+  contains_japanese: boolean
+}
+  ↓
+POST /api/ollama/translate/pages (例: バランス使用時)
+  {
+    pages: [{page, text}],
+    direction: "en-to-ja",
+    document_type: "steel_technical"
+  }
+  ↓
+OllamaTranslator.translate_pages()
+  ├─ Load prompt from prompts.json (document_type)
+  ├─ Apply glossary markers
+  ├─ Generate translation prompt
+  ├─ requests.post to Ollama API
+  └─ Output: translated pages
+  ↓
+Response {
+  success: true,
+  pages: [{page, original, translated}],
+  direction: "en-to-ja"
+}
+2. 用語集適用フロー
+Original Text
+  ↓
+_apply_glossary_markers()
+  ├─ 用語をマーカー(__TERM_0__, etc.)に置換
+  └─ マーカーと翻訳のマッピングを保存
+  ↓
+Translation Engine
+  ├─ マーカーは翻訳されずそのまま維持
+  └─ Output: text with markers
+  ↓
+_replace_markers_with_translations()
+  └─ マーカーを用語集の翻訳語に置換
+  ↓
+Final Translated Text
+横罫線
+3. 技術スタック
+Backend
+カテゴリ	技術	バージョン	用途
+フレームワーク	FastAPI	0.104.1	Web API
+ASGIサーバー	Uvicorn	0.24.0	非同期サーバー
+PDF処理	PyMuPDF	1.23.0+	テキスト・レイアウト抽出
+PDF処理	pdfplumber	0.10.3	補助的PDF解析
+PDF処理	PyPDF2	3.0.1	PDF情報取得
+LLM推論	Transformers	4.36.0+	Swallowモデル推論
+LLM推論	PyTorch	2.1.0+	深層学習フレームワーク
+LLM推論	Accelerate	0.25.0	モデル高速化
+量子化	bitsandbytes	0.41.0+	4bit/8bit量子化
+トークナイザー	SentencePiece	0.1.99+	トークン化
+ファイルアップロード	python-multipart	0.0.6	multipart/form-data
+
+Frontend
+カテゴリ	技術	バージョン	用途
+UIフレームワーク	React	18.2.0	コンポーネントベースUI
+言語	TypeScript	5.2.2	型安全な開発
+ビルドツール	Vite	5.0.8	高速開発サーバー
+PDFビューア	react-pdf	7.5.1	PDF描画
+PDF処理	pdfjs-dist	3.11.174	PDF解析
+HTTP通信	Axios	1.6.2	API通信
+状態管理	Zustand	4.4.7	グローバル状態管理
+
+横罫線
+4. API仕様
+PDF操作
+エンドポイント	メソッド	説明
+/api/pdf/upload	POST	PDFアップロード・テキスト抽出
+/api/download/translation	POST	翻訳結果ダウンロード（文書タイプ・エンジン情報付き）
+
+文書タイプ
+エンドポイント	メソッド	説明
+/api/document-types	GET	文書タイプ一覧取得
+
+翻訳 (共通)
+エンドポイント	メソッド	説明
+/api/translate	POST	単一テキスト翻訳
+/api/translate/pages	POST	ページ単位翻訳
+/api/translate/batch	POST	バッチ翻訳
+/api/translate/progress	GET	翻訳進捗取得
+/api/translate/cancel	POST	翻訳キャンセル
+/api/engine/switch	POST	エンジン切り替え
+
+Ollama翻訳
+エンドポイント	メソッド	説明
+/api/ollama/status	GET	Ollama利用可否確認
+/api/ollama/models	GET	利用可能モデル一覧
+/api/ollama/translate/pages	POST	Ollamaでページ翻訳
+/api/ollama/progress	GET	翻訳進捗取得
+/api/ollama/cancel	POST	翻訳キャンセル
+/api/ollama/question	POST	質問応答
+
+Swallow翻訳
+エンドポイント	メソッド	説明
+/api/swallow/status	GET	Swallow利用可否確認
+/api/swallow/translate/pages	POST	Swallowでページ翻訳
+/api/swallow/progress	GET	翻訳進捗取得
+/api/swallow/cancel	POST	翻訳キャンセル
+
+Apple翻訳
+エンドポイント	メソッド	説明
+/api/apple/status	GET	Apple翻訳利用可否確認
+/api/apple/translate/pages	POST	Apple翻訳でページ翻訳
+/api/apple/progress	GET	翻訳進捗取得
+/api/apple/cancel	POST	翻訳キャンセル
+
+用語集
+エンドポイント	メソッド	説明
+/api/glossary	GET	用語集取得
+/api/glossary	POST	用語集更新
+/api/glossary/add	POST	用語追加
+/api/glossary/delete	POST	用語削除
+/api/glossary/import	POST	CSVインポート
+/api/glossary/export	GET	CSVエクスポート
+
+横罫線
+5. データモデル
+PageData (抽出されたページ)
+{
+  page: number,        // ページ番号
+  text: string,        // 抽出テキスト
+  blocks?: [{          // テキストブロック情報
+    bbox: [x0, y0, x1, y1],
+    text: string
+  }]
+}
+TranslatedPage (翻訳済みページ)
+{
+  page: number,           // ページ番号
+  original_text: string,  // 原文
+  translated_text: string // 翻訳文
+}
+Glossary (用語集)
+{
+  "English Term": "日本語訳",
+  "API": "API",
+  "specification": "仕様"
+}
+Progress (進捗情報)
+{
+  current: number,     // 現在のページ
+  total: number,       // 総ページ数
+  percentage: number   // 進捗率 (0-100)
+}
+DocumentType (文書タイプ)
+{
+  id: string,          // 文書タイプID (例: "steel_technical")
+  name: string,        // 表示名 (例: "鉄鋼業における技術文書")
+  description: string  // 説明
+}
+
+利用可能な文書タイプ:
+- steel_technical: 鉄鋼業における技術文書（デフォルト）
+- general_technical: 一般的な技術文書
+- academic_paper: 技術論文
+- contract: 契約書
+- general_document: 一般的な文書（新聞・記事・ブログ）
+- order_acceptance: 注文書・検収書
+横罫線
+6. バックエンド設計
+主要クラス
+PDFProcessor
+- extract_text_from_pdf(content: bytes) → List[Dict]
+- get_pdf_info(content: bytes) → Dict
+- extract_with_layout(content: bytes) → List[Dict]
+
+プロンプト管理
+load_prompts() → Dict                      // prompts.jsonからプロンプト読み込み
+get_document_types() → List[Dict]          // 文書タイプ一覧取得
+get_prompt_template(document_type, direction) → Dict  // プロンプトテンプレート取得
+
+OllamaTranslator (バランス)
+- __init__(model: str = "qwen3:4b-instruct")
+- translate_text(text: str, direction: str, document_type: str) → str
+- translate_pages(pages: List, direction: str, document_type: str) → List
+- get_progress() → Dict
+- cancel_translation()
+- update_glossary(glossary: Dict)
+
+SwallowTranslator (日本語重視)
+- __init__()  // Llama-3.1-Swallow-8B-Instruct-v0.5
+- translate_text(text: str, direction: str, document_type: str) → str
+- translate_pages(pages: List, direction: str, document_type: str) → List
+- unload_model()  // メモリ解放
+
+AppleTranslator (簡易翻訳)
+- __init__()  // macOS 15+ Translation Framework
+- translate_text(text: str, direction: str) → str
+- translate_pages(pages: List, direction: str) → List
+- _call_swift_translator(text: str, direction: str) → str
+依存関係注入パターン
+# グローバルインスタンス管理
+_ollama_translator = None
+_swallow_translator = None
+_apple_translator = None
+
+def get_ollama_translator() -> OllamaTranslator:
+    global _ollama_translator
+    if _ollama_translator is None:
+        _ollama_translator = OllamaTranslator()
+    return _ollama_translator
+
+def unload_swallow_translator():
+    """エンジン切り替え時にSwallowモデルを解放"""
+    global _swallow_translator
+    if _swallow_translator is not None:
+        _swallow_translator.unload_model()
+        _swallow_translator = None
+横罫線
+7. フロントエンド設計
+コンポーネント構成
+App.tsx
+├─ FileUpload.tsx      // PDFアップロード
+├─ PdfViewer.tsx       // PDF表示・ページ切替
+├─ ControlPanel.tsx    // エンジン選択・翻訳方向・進捗
+├─ TranslationPanel.tsx // 原文・翻訳文表示
+├─ GlossaryPanel.tsx   // 用語集管理
+└─ QuestionPanel.tsx   // AI質問応答
+状態管理
+// App.tsx での状態
+const [file, setFile] = useState<File | null>(null);
+const [pagesData, setPagesData] = useState<PageData[]>([]);
+const [translatedPages, setTranslatedPages] = useState<TranslatedPage[]>([]);
+const [translationEngine, setTranslationEngine] = useState<'apple' | 'ollama' | 'swallow'>('ollama');
+const [translationDirection, setTranslationDirection] = useState<TranslationDirection>('en-to-ja');
+const [documentType, setDocumentType] = useState<DocumentType>('steel_technical');
+const [translationProgress, setTranslationProgress] = useState<{
+  current: number;
+  total: number;
+  percentage: number;
+} | null>(null);
+
+// handlePageChangeをuseCallbackでメモ化（PDFビューアのちらつき防止）
+const handlePageChange = useCallback((page: number) => {
+  setCurrentPage(page);
+}, []);
+横罫線
+8. 翻訳エンジン設計
+翻訳エンジン一覧
+UI表示名	内部名	モデル	特徴
+バランス	ollama	qwen3:4b-instruct	高速・省メモリ・高品質（推奨）
+日本語重視	swallow	Llama-3.1-Swallow-8B	日本語特化・高精度
+簡易翻訳	apple	Apple Translation	軽量・高速
+
+バランス (Ollama) - デフォルト
+モデル: qwen3:4b-instruct
+特徴: 軽量・高速、4GBモデル
+接続: localhost:11434 (プロキシ無効化)
+用途: 一般的な翻訳、高速処理が必要な場合
+日本語重視 (Swallow)
+モデル: Llama-3.1-Swallow-8B-Instruct-v0.5
+特徴: 日本語特化、高精度
+量子化: 4bit (bitsandbytes)
+メモリ: 約8GB VRAM使用
+用途: 高精度な日本語翻訳が必要な場合
+簡易翻訳 (Apple翻訳)
+フレームワーク: macOS 15+ Translation Framework
+呼び出し: Swiftスクリプト経由
+特徴: オフライン動作、システム統合
+用途: 軽量・高速翻訳、プライバシー重視
+プロンプト管理 (prompts.json)
+{
+  "document_types": {
+    "steel_technical": {
+      "name": "鉄鋼業における技術文書",
+      "description": "鉄鋼業界の設備仕様書・技術文書向け",
+      "en_to_ja": { "system": "...", "prompt_template": "..." },
+      "ja_to_en": { "system": "...", "prompt_template": "..." }
+    },
+    // ... 他の文書タイプ
+  },
+  "default_type": "steel_technical"
+}
+横罫線
+9. パフォーマンス最適化
+メモリ管理
+日本語重視モデル解放: エンジン切り替え時に自動アンロード
+キャッシュクリア: ページ翻訳完了ごとにGC実行
+def _clear_memory_cache(self):
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+翻訳最適化
+プロキシ無効化: バランス(Ollama)へのローカル接続を高速化
+バッチ処理: ページ単位での非同期翻訳
+進捗表示: ページ開始時点での進捗更新
+フロントエンド最適化
+React.memo: PdfViewerコンポーネントのメモ化（ちらつき防止）
+useCallback: handlePageChangeのメモ化（参照安定化）
+横罫線
+10. セキュリティ設計
+ローカル処理
+すべての翻訳処理はローカルで完結
+外部APIへのデータ送信なし
+機密文書の安全な翻訳
+CORS設定
+allow_origins=["http://localhost:5173", "http://localhost:3000"]
+allow_credentials=True
+allow_methods=["*"]
+allow_headers=["*"]
+横罫線
+11. 設定・環境変数
+backend/.env
+# サーバー設定
+HOST=0.0.0.0
+PORT=8002
+
+# モデル設定
+DEFAULT_ENGINE=ollama
+OLLAMA_MODEL=qwen3:4b-instruct
+横罫線
+12. ディレクトリ構造
+PDF_Translation_App/
+├── backend/
+│   ├── main.py              # FastAPI アプリケーション
+│   ├── translator.py        # 翻訳エンジン (Ollama/Swallow/Apple)
+│   ├── pdf_processor.py     # PDF処理
+│   ├── prompts.json         # 文書タイプ別プロンプト定義
+│   ├── apple_translate.swift # Apple翻訳スクリプト
+│   ├── requirements.txt     # Python依存関係
+│   ├── data/
+│   │   └── glossary.json    # 用語集データ
+│   └── venv/                # Python仮想環境
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx          # メインアプリケーション
+│   │   ├── api.ts           # API通信
+│   │   ├── types.ts         # 型定義 (DocumentType等)
+│   │   └── components/
+│   │       ├── FileUpload.tsx    # 文書タイプ選択付きアップロード
+│   │       ├── PdfViewer.tsx     # PDF表示 (React.memoでメモ化)
+│   │       ├── ControlPanel.tsx  # エンジン・文書タイプ選択・ダウンロード
+│   │       ├── TranslationPanel.tsx
+│   │       ├── GlossaryPanel.tsx
+│   │       └── QuestionPanel.tsx
+│   ├── public/
+│   │   ├── cmaps/           # PDF.js用CMap
+│   │   ├── docs/            # マニュアル (公開用コピー)
+│   │   └── standard_fonts/  # PDF.js用フォント
+│   └── package.json
+├── docs/
+│   ├── manual-slides.html   # ユーザーマニュアル
+│   └── technical-specification.txt  # 技術仕様書
+├── start.sh                 # 起動スクリプト
+├── stop.sh                  # 停止スクリプト
+└── setup.sh                 # セットアップスクリプト
+横罫線
+13. デプロイ構成
+起動手順
+# セットアップ（初回のみ）
+./setup.sh
+
+# 起動
+./start.sh
+
+# 停止
+./stop.sh
+ポート構成
+サービス	ポート	説明
+Backend (FastAPI)	8002	REST API
+Frontend (Vite)	5173	開発サーバー
+Ollama	11434	LLM推論サーバー
+
+横罫線
+14. システム要件
+ハードウェア
+項目	最小要件	推奨要件
+Mac	Apple Silicon (M1以降)	M1 Pro以上
+メモリ	16GB	32GB以上
+ストレージ	20GB空き	50GB以上
+
+ソフトウェア
+項目	バージョン	備考
+macOS	14.0 (Sonoma)以上	Apple翻訳は15.0以上
+Python	3.9以上	3.11推奨
+Node.js	18以上	20 LTS推奨
+Ollama	最新版	qwen3:4b-instructモデル
+
+横罫線
+15. 既知の制限事項
+PDF処理
+スキャンPDF（画像ベース）は非対応
+複雑なレイアウト（多段組み等）で抽出精度低下の可能性
+暗号化PDFは非対応
+翻訳
+長文（4000文字以上）は分割翻訳される
+専門用語は用語集で補完が必要
+翻訳速度はモデルとハードウェアに依存
+システム
+macOS専用（WindowsやLinuxは非対応）
+Apple翻訳はmacOS 15以降が必要
+Ollamaは別途インストール・起動が必要

@@ -97,7 +97,7 @@ const GlossaryPanel: React.FC = () => {
   if (!isOpen) {
     return (
       <button onClick={() => setIsOpen(true)} style={styles.toggleButton}>
-        📚 用語集を開く
+        用語集を開く
       </button>
     );
   }

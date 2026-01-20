@@ -9,19 +9,27 @@ import io
 from datetime import datetime
 
 from pdf_processor import PDFProcessor, PDFTextMerger
-from translator import get_translator, set_quality, get_apple_translator
+from translator import (
+    get_apple_translator,
+    get_ollama_translator,
+    get_swallow_translator,
+    get_swallow_status,
+    unload_swallow_translator,
+    get_document_types,
+    load_glossary_from_file,
+    save_glossary_to_file
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# アプリケーション起動時にモデルをロード
+# アプリケーション起動時の初期化
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 起動時
-    logger.info("Loading translation model...")
-    get_translator()  # モデルの事前ロード
-    logger.info("Model loaded successfully")
+    logger.info("PDF Translation API starting...")
+    logger.info("Translation engines: Ollama (バランス), Swallow (日本語重視), Apple (簡易翻訳)")
     yield
     # 終了時
     logger.info("Shutting down...")
@@ -29,8 +37,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PDF Translation API",
-    description="Technical document translation using Qwen3-14B",
-    version="1.0.0",
+    description="Technical document translation with Ollama, Swallow, and Apple Translation",
+    version="2.2.0",
     lifespan=lifespan
 )
 
@@ -56,12 +64,31 @@ async def root():
 @app.get("/health")
 async def health_check():
     """詳細なヘルスチェック"""
-    translator = get_translator()
+    ollama_translator = get_ollama_translator()
     return {
         "status": "healthy",
-        "model_loaded": translator is not None,
-        "device": translator.device if translator else "unknown"
+        "ollama_available": ollama_translator.ollama_available if ollama_translator else False,
+        "engines": ["ollama", "swallow", "apple"]
     }
+
+
+@app.get("/api/document-types")
+async def get_document_types_api():
+    """
+    利用可能な文書タイプの一覧を取得
+
+    Returns:
+        文書タイプのリスト
+    """
+    try:
+        document_types = get_document_types()
+        return JSONResponse({
+            "success": True,
+            "document_types": document_types
+        })
+    except Exception as e:
+        logger.error(f"Error getting document types: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error getting document types: {str(e)}")
 
 
 @app.post("/api/pdf/upload")
@@ -89,181 +116,32 @@ async def upload_pdf(file: UploadFile = File(...)):
         # テキスト抽出
         pages_data = PDFProcessor.extract_text_from_pdf(content)
 
+        # 日本語が含まれているかを検出（最初の数ページをチェック）
+        contains_japanese = False
+        sample_text = ""
+        for page in pages_data[:3]:  # 最初の3ページをサンプル
+            sample_text += page.get("text", "")
+
+        # 日本語文字（ひらがな、カタカナ、漢字）の検出
+        import re
+        japanese_pattern = re.compile(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]')
+        japanese_chars = japanese_pattern.findall(sample_text)
+        # 日本語文字が一定数以上あれば日本語文書と判定
+        contains_japanese = len(japanese_chars) > 10
+
+        logger.info(f"Japanese detection: {len(japanese_chars)} characters found, contains_japanese={contains_japanese}")
+
         return JSONResponse({
             "success": True,
             "filename": file.filename,
             "info": pdf_info,
-            "pages": pages_data
+            "pages": pages_data,
+            "contains_japanese": contains_japanese
         })
 
     except Exception as e:
         logger.error(f"Error processing PDF: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
-
-
-@app.post("/api/translate")
-async def translate_text(data: Dict):
-    """
-    テキストの翻訳
-
-    Args:
-        data: {"text": "翻訳するテキスト", "context": "オプションの文脈"}
-
-    Returns:
-        翻訳結果
-    """
-    try:
-        text = data.get("text", "")
-        context = data.get("context", "")
-
-        if not text:
-            raise HTTPException(status_code=400, detail="Text is required")
-
-        translator = get_translator()
-        translation = translator.translate_text(text, context)
-
-        return JSONResponse({
-            "success": True,
-            "original": text,
-            "translated": translation
-        })
-
-    except Exception as e:
-        logger.error(f"Translation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
-
-
-@app.post("/api/translate/pages")
-async def translate_pages(data: Dict):
-    """
-    PDFページデータの翻訳
-
-    Args:
-        data: {
-            "pages": [ページデータのリスト],
-            "quality": "high"|"balanced"|"fast" (オプション)
-        }
-
-    Returns:
-        翻訳されたページデータ
-    """
-    try:
-        pages_data = data.get("pages", [])
-        quality = data.get("quality", "balanced")
-
-        if not pages_data:
-            raise HTTPException(status_code=400, detail="Pages data is required")
-
-        logger.info(f"Translating {len(pages_data)} pages with quality: {quality}...")
-
-        translator = get_translator(quality=quality)
-
-        # 翻訳処理（非同期で実行）
-        loop = asyncio.get_event_loop()
-        translated_pages = await loop.run_in_executor(
-            None,
-            translator.translate_pages,
-            pages_data
-        )
-
-        # オリジナルと翻訳をマージ
-        merged_data = PDFTextMerger.merge_translations(pages_data, translated_pages)
-
-        return JSONResponse({
-            "success": True,
-            "pages": merged_data,
-            "quality": quality
-        })
-
-    except Exception as e:
-        logger.error(f"Translation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
-
-
-@app.post("/api/translate/batch")
-async def translate_batch(data: Dict):
-    """
-    複数テキストのバッチ翻訳
-
-    Args:
-        data: {"texts": ["text1", "text2", ...], "context": "オプション"}
-
-    Returns:
-        翻訳結果のリスト
-    """
-    try:
-        texts = data.get("texts", [])
-        context = data.get("context", "")
-
-        if not texts:
-            raise HTTPException(status_code=400, detail="Texts are required")
-
-        translator = get_translator()
-
-        # バッチ翻訳
-        loop = asyncio.get_event_loop()
-        translations = await loop.run_in_executor(
-            None,
-            translator.translate_batch,
-            texts,
-            context
-        )
-
-        return JSONResponse({
-            "success": True,
-            "translations": [
-                {"original": orig, "translated": trans}
-                for orig, trans in zip(texts, translations)
-            ]
-        })
-
-    except Exception as e:
-        logger.error(f"Batch translation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Translation error: {str(e)}")
-
-
-@app.get("/api/translate/progress")
-async def get_translation_progress():
-    """
-    翻訳進捗状況を取得
-
-    Returns:
-        進捗情報
-    """
-    try:
-        translator = get_translator()
-        progress = translator.get_progress()
-
-        return JSONResponse({
-            "success": True,
-            "progress": progress
-        })
-
-    except Exception as e:
-        logger.error(f"Progress error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Progress error: {str(e)}")
-
-
-@app.post("/api/translate/cancel")
-async def cancel_translation():
-    """
-    翻訳処理をキャンセル
-
-    Returns:
-        キャンセル結果
-    """
-    try:
-        translator = get_translator()
-        translator.cancel_translation()
-
-        return JSONResponse({
-            "success": True,
-            "message": "Translation cancellation requested"
-        })
-
-    except Exception as e:
-        logger.error(f"Cancel error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Cancel error: {str(e)}")
 
 
 @app.post("/api/download/translation")
@@ -275,7 +153,10 @@ async def download_translation(data: Dict):
         data: {
             "pages": [翻訳済みページデータ],
             "format": "original"|"translated"|"both",
-            "pageNumbers": [1, 2, 3] (オプション、指定ページのみダウンロード)
+            "pageNumbers": [1, 2, 3] (オプション、指定ページのみダウンロード),
+            "documentType": 文書タイプ (オプション),
+            "translationEngine": 翻訳エンジン (オプション),
+            "ollamaModel": Ollamaモデル名 (オプション)
         }
 
     Returns:
@@ -285,6 +166,9 @@ async def download_translation(data: Dict):
         pages_data = data.get("pages", [])
         download_format = data.get("format", "both")
         page_numbers = data.get("pageNumbers", None)
+        document_type = data.get("documentType", None)
+        translation_engine = data.get("translationEngine", None)
+        ollama_model = data.get("ollamaModel", None)
 
         if not pages_data:
             raise HTTPException(status_code=400, detail="Pages data is required")
@@ -296,7 +180,13 @@ async def download_translation(data: Dict):
                 raise HTTPException(status_code=400, detail="No matching pages found")
 
         # テキストファイルの生成
-        text_content = _generate_text_file(pages_data, download_format)
+        text_content = _generate_text_file(
+            pages_data,
+            download_format,
+            document_type=document_type,
+            translation_engine=translation_engine,
+            ollama_model=ollama_model
+        )
 
         # ファイル名の生成
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -321,75 +211,28 @@ async def download_translation(data: Dict):
         raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
 
 
-@app.post("/api/quality/set")
-async def set_translation_quality(data: Dict):
-    """
-    翻訳品質設定を変更
+# ========== 用語集 API ==========
 
-    Args:
-        data: {"quality": "high"|"balanced"|"fast"}
+@app.get("/api/glossary")
+async def get_glossary():
+    """
+    現在の用語集を取得
 
     Returns:
-        設定結果
+        用語集
     """
     try:
-        quality = data.get("quality", "balanced")
-
-        if quality not in ["high", "balanced", "fast"]:
-            raise HTTPException(status_code=400, detail="Invalid quality. Must be 'high', 'balanced', or 'fast'")
-
-        set_quality(quality)
+        glossary = load_glossary_from_file()
 
         return JSONResponse({
             "success": True,
-            "quality": quality,
-            "message": f"Quality set to {quality}"
+            "glossary": glossary,
+            "count": len(glossary)
         })
 
     except Exception as e:
-        logger.error(f"Quality setting error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Quality setting error: {str(e)}")
-
-
-@app.get("/api/quality/info")
-async def get_quality_info():
-    """
-    利用可能な品質設定情報を取得
-
-    Returns:
-        品質設定情報
-    """
-    try:
-        from translator import Qwen3Translator, _current_quality
-
-        return JSONResponse({
-            "success": True,
-            "current": _current_quality,
-            "options": {
-                "high": {
-                    "model": Qwen3Translator.MODELS["high"],
-                    "description": "最高品質 - Qwen3-14B",
-                    "speed": "遅い",
-                    "quality": "最高"
-                },
-                "balanced": {
-                    "model": Qwen3Translator.MODELS["balanced"],
-                    "description": "バランス - Qwen2.5-7B",
-                    "speed": "中",
-                    "quality": "高"
-                },
-                "fast": {
-                    "model": Qwen3Translator.MODELS["fast"],
-                    "description": "高速 - Qwen2.5-3B",
-                    "speed": "速い",
-                    "quality": "中"
-                }
-            }
-        })
-
-    except Exception as e:
-        logger.error(f"Quality info error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Quality info error: {str(e)}")
+        logger.error(f"Glossary get error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Glossary get error: {str(e)}")
 
 
 @app.post("/api/glossary/update")
@@ -409,8 +252,14 @@ async def update_glossary(data: Dict):
         if not isinstance(glossary, dict):
             raise HTTPException(status_code=400, detail="Glossary must be a dictionary")
 
-        translator = get_translator()
-        translator.update_glossary(glossary)
+        save_glossary_to_file(glossary)
+
+        # 各翻訳エンジンの用語集を更新
+        try:
+            ollama = get_ollama_translator()
+            ollama.update_glossary(glossary)
+        except:
+            pass
 
         return JSONResponse({
             "success": True,
@@ -441,8 +290,17 @@ async def add_glossary_term(data: Dict):
         if not english or not japanese:
             raise HTTPException(status_code=400, detail="Both english and japanese terms are required")
 
-        translator = get_translator()
-        translator.add_glossary_term(english, japanese)
+        # 既存の用語集を読み込み
+        glossary = load_glossary_from_file()
+        glossary[english] = japanese
+        save_glossary_to_file(glossary)
+
+        # 各翻訳エンジンの用語集を更新
+        try:
+            ollama = get_ollama_translator()
+            ollama.update_glossary(glossary)
+        except:
+            pass
 
         return JSONResponse({
             "success": True,
@@ -455,85 +313,17 @@ async def add_glossary_term(data: Dict):
         raise HTTPException(status_code=500, detail=f"Glossary add error: {str(e)}")
 
 
-@app.get("/api/glossary")
-async def get_glossary():
-    """
-    現在の用語集を取得
-
-    Returns:
-        用語集
-    """
-    try:
-        translator = get_translator()
-
-        return JSONResponse({
-            "success": True,
-            "glossary": translator.glossary,
-            "count": len(translator.glossary)
-        })
-
-    except Exception as e:
-        logger.error(f"Glossary get error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Glossary get error: {str(e)}")
-
-
-@app.post("/api/ask")
-async def ask_question(data: Dict):
-    """
-    PDFの内容についてAIに質問する
-
-    Args:
-        data: {
-            "question": "質問テキスト",
-            "context": "PDFのテキスト内容"
-        }
-
-    Returns:
-        AIからの回答
-    """
-    try:
-        question = data.get("question", "")
-        context = data.get("context", "")
-
-        if not question:
-            raise HTTPException(status_code=400, detail="Question is required")
-
-        if not context:
-            raise HTTPException(status_code=400, detail="Context (PDF content) is required")
-
-        logger.info(f"Answering question: {question[:50]}...")
-
-        translator = get_translator()
-
-        # 非同期で質問回答を実行
-        loop = asyncio.get_event_loop()
-        answer = await loop.run_in_executor(
-            None,
-            translator.ask_question,
-            question,
-            context
-        )
-
-        return JSONResponse({
-            "success": True,
-            "question": question,
-            "answer": answer
-        })
-
-    except Exception as e:
-        logger.error(f"Question error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Question error: {str(e)}")
-
+# ========== Apple翻訳 API ==========
 
 @app.post("/api/translate/apple")
 async def translate_pages_apple(data: Dict):
     """
-    Apple翻訳（Google翻訳API）を使用したページ翻訳
-    LLMを使用せず軽量に翻訳を行う
+    Apple翻訳を使用したページ翻訳
 
     Args:
         data: {
-            "pages": [ページデータのリスト]
+            "pages": [ページデータのリスト],
+            "direction": "en-to-ja"|"ja-to-en" (オプション)
         }
 
     Returns:
@@ -541,11 +331,12 @@ async def translate_pages_apple(data: Dict):
     """
     try:
         pages_data = data.get("pages", [])
+        direction = data.get("direction", "en-to-ja")
 
         if not pages_data:
             raise HTTPException(status_code=400, detail="Pages data is required")
 
-        logger.info(f"[Apple] Translating {len(pages_data)} pages...")
+        logger.info(f"[Apple] Translating {len(pages_data)} pages with direction: {direction}...")
 
         translator = get_apple_translator()
 
@@ -553,8 +344,7 @@ async def translate_pages_apple(data: Dict):
         loop = asyncio.get_event_loop()
         translated_pages = await loop.run_in_executor(
             None,
-            translator.translate_pages,
-            pages_data
+            lambda: translator.translate_pages(pages_data, direction=direction)
         )
 
         # オリジナルと翻訳をマージ
@@ -563,7 +353,8 @@ async def translate_pages_apple(data: Dict):
         return JSONResponse({
             "success": True,
             "pages": merged_data,
-            "engine": "apple"
+            "engine": "apple",
+            "direction": direction
         })
 
     except Exception as e:
@@ -615,21 +406,461 @@ async def cancel_apple_translation():
         raise HTTPException(status_code=500, detail=f"Cancel error: {str(e)}")
 
 
-def _generate_text_file(pages_data: List[Dict], format_type: str) -> str:
+# ========== Ollama翻訳 API ==========
+
+@app.get("/api/ollama/status")
+async def get_ollama_status():
+    """
+    Ollamaの接続状態を確認
+
+    Returns:
+        Ollamaのステータス情報
+    """
+    try:
+        translator = get_ollama_translator()
+
+        return JSONResponse({
+            "success": True,
+            "available": translator.ollama_available,
+            "current_model": translator.model,
+            "base_url": translator.base_url
+        })
+
+    except Exception as e:
+        logger.error(f"Ollama status error: {str(e)}")
+        return JSONResponse({
+            "success": False,
+            "available": False,
+            "error": str(e)
+        })
+
+
+@app.get("/api/ollama/models")
+async def get_ollama_models():
+    """
+    利用可能なOllamaモデル一覧を取得
+
+    Returns:
+        モデル一覧
+    """
+    try:
+        translator = get_ollama_translator()
+        models = translator.get_available_models()
+
+        return JSONResponse({
+            "success": True,
+            "models": models,
+            "current_model": translator.model
+        })
+
+    except Exception as e:
+        logger.error(f"Ollama models error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ollama models error: {str(e)}")
+
+
+@app.post("/api/ollama/model/set")
+async def set_ollama_model(data: Dict):
+    """
+    使用するOllamaモデルを変更
+
+    Args:
+        data: {"model": "モデル名"}
+
+    Returns:
+        設定結果
+    """
+    try:
+        model = data.get("model", "")
+
+        if not model:
+            raise HTTPException(status_code=400, detail="Model name is required")
+
+        translator = get_ollama_translator(model=model)
+
+        return JSONResponse({
+            "success": True,
+            "model": translator.model,
+            "message": f"Model set to {translator.model}"
+        })
+
+    except Exception as e:
+        logger.error(f"Ollama model set error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ollama model set error: {str(e)}")
+
+
+@app.post("/api/translate/ollama")
+async def translate_pages_ollama(data: Dict):
+    """
+    Ollamaを使用したページ翻訳
+
+    Args:
+        data: {
+            "pages": [ページデータのリスト],
+            "model": "モデル名（オプション）",
+            "direction": "en-to-ja"|"ja-to-en" (オプション),
+            "document_type": "文書タイプ（オプション）"
+        }
+
+    Returns:
+        翻訳されたページデータ
+    """
+    try:
+        pages_data = data.get("pages", [])
+        model = data.get("model", None)
+        direction = data.get("direction", "en-to-ja")
+        document_type = data.get("document_type", "steel_technical")
+
+        if not pages_data:
+            raise HTTPException(status_code=400, detail="Pages data is required")
+
+        logger.info(f"[Ollama] Translating {len(pages_data)} pages with model: {model or 'default'}, direction: {direction}, doc_type: {document_type}...")
+
+        translator = get_ollama_translator(model=model)
+
+        if not translator.ollama_available:
+            raise HTTPException(status_code=503, detail="Ollama is not available. Please ensure Ollama is running.")
+
+        # 翻訳処理（非同期で実行）
+        loop = asyncio.get_event_loop()
+        translated_pages = await loop.run_in_executor(
+            None,
+            lambda: translator.translate_pages(pages_data, direction=direction, document_type=document_type)
+        )
+
+        # オリジナルと翻訳をマージ
+        merged_data = PDFTextMerger.merge_translations(pages_data, translated_pages)
+
+        return JSONResponse({
+            "success": True,
+            "pages": merged_data,
+            "engine": "ollama",
+            "model": translator.model,
+            "direction": direction
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ollama translation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ollama translation error: {str(e)}")
+
+
+@app.get("/api/translate/ollama/progress")
+async def get_ollama_translation_progress():
+    """
+    Ollama翻訳の進捗状況を取得
+
+    Returns:
+        進捗情報
+    """
+    try:
+        translator = get_ollama_translator()
+        progress = translator.get_progress()
+
+        return JSONResponse({
+            "success": True,
+            "progress": progress
+        })
+
+    except Exception as e:
+        logger.error(f"Ollama progress error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Progress error: {str(e)}")
+
+
+@app.post("/api/translate/ollama/cancel")
+async def cancel_ollama_translation():
+    """
+    Ollama翻訳処理をキャンセル
+
+    Returns:
+        キャンセル結果
+    """
+    try:
+        translator = get_ollama_translator()
+        translator.cancel_translation()
+
+        return JSONResponse({
+            "success": True,
+            "message": "Ollama translation cancellation requested"
+        })
+
+    except Exception as e:
+        logger.error(f"Ollama cancel error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cancel error: {str(e)}")
+
+
+@app.post("/api/ask/ollama")
+async def ask_question_ollama(data: Dict):
+    """
+    Ollamaを使用してPDFの内容について質問する
+
+    Args:
+        data: {
+            "question": "質問テキスト",
+            "context": "PDFのテキスト内容",
+            "model": "モデル名（オプション）"
+        }
+
+    Returns:
+        AIからの回答
+    """
+    try:
+        question = data.get("question", "")
+        context = data.get("context", "")
+        model = data.get("model", None)
+
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
+
+        if not context:
+            raise HTTPException(status_code=400, detail="Context (PDF content) is required")
+
+        logger.info(f"[Ollama] Answering question: {question[:50]}...")
+
+        translator = get_ollama_translator(model=model)
+
+        if not translator.ollama_available:
+            raise HTTPException(status_code=503, detail="Ollama is not available")
+
+        # 非同期で質問回答を実行
+        loop = asyncio.get_event_loop()
+        answer = await loop.run_in_executor(
+            None,
+            translator.ask_question,
+            question,
+            context
+        )
+
+        return JSONResponse({
+            "success": True,
+            "question": question,
+            "answer": answer,
+            "model": translator.model
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ollama question error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Question error: {str(e)}")
+
+
+# ========== Swallow翻訳 API ==========
+
+@app.get("/api/swallow/status")
+async def get_swallow_model_status():
+    """
+    Swallowモデルのロード状態を取得
+
+    Returns:
+        ステータス情報 {"loaded": bool, "loading": bool, "error": str|None}
+    """
+    try:
+        status = get_swallow_status()
+        return JSONResponse({
+            "success": True,
+            **status
+        })
+    except Exception as e:
+        logger.error(f"Swallow status error: {str(e)}")
+        return JSONResponse({
+            "success": False,
+            "loaded": False,
+            "loading": False,
+            "error": str(e)
+        })
+
+
+@app.post("/api/translate/swallow")
+async def translate_pages_swallow(data: Dict):
+    """
+    Swallow (Llama-3.1-Swallow-8B) を使用したページ翻訳
+    日本語に特化したLlamaベースのモデル
+
+    Args:
+        data: {
+            "pages": [ページデータのリスト],
+            "direction": "en-to-ja"|"ja-to-en" (オプション),
+            "document_type": "文書タイプ（オプション）"
+        }
+
+    Returns:
+        翻訳されたページデータ
+    """
+    try:
+        pages_data = data.get("pages", [])
+        direction = data.get("direction", "en-to-ja")
+        document_type = data.get("document_type", "steel_technical")
+
+        if not pages_data:
+            raise HTTPException(status_code=400, detail="Pages data is required")
+
+        logger.info(f"[Swallow] Translating {len(pages_data)} pages with direction: {direction}, doc_type: {document_type}...")
+
+        translator = get_swallow_translator()
+
+        # 翻訳処理（非同期で実行）
+        loop = asyncio.get_event_loop()
+        translated_pages = await loop.run_in_executor(
+            None,
+            lambda: translator.translate_pages(pages_data, direction=direction, document_type=document_type)
+        )
+
+        # オリジナルと翻訳をマージ
+        merged_data = PDFTextMerger.merge_translations(pages_data, translated_pages)
+
+        return JSONResponse({
+            "success": True,
+            "pages": merged_data,
+            "engine": "swallow",
+            "model": "Llama-3.1-Swallow-8B-Instruct-v0.5",
+            "direction": direction
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Swallow translation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Swallow translation error: {str(e)}")
+
+
+@app.get("/api/translate/swallow/progress")
+async def get_swallow_translation_progress():
+    """
+    Swallow翻訳の進捗状況を取得
+
+    Returns:
+        進捗情報
+    """
+    try:
+        translator = get_swallow_translator()
+        progress = translator.get_progress()
+
+        return JSONResponse({
+            "success": True,
+            "progress": progress
+        })
+
+    except Exception as e:
+        logger.error(f"Swallow progress error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Progress error: {str(e)}")
+
+
+@app.post("/api/translate/swallow/cancel")
+async def cancel_swallow_translation():
+    """
+    Swallow翻訳処理をキャンセル
+
+    Returns:
+        キャンセル結果
+    """
+    try:
+        translator = get_swallow_translator()
+        translator.cancel_translation()
+
+        return JSONResponse({
+            "success": True,
+            "message": "Swallow translation cancellation requested"
+        })
+
+    except Exception as e:
+        logger.error(f"Swallow cancel error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cancel error: {str(e)}")
+
+
+# ========== エンジン切り替え API ==========
+
+@app.post("/api/engine/switch")
+async def switch_translation_engine(data: Dict):
+    """
+    翻訳エンジンを切り替える
+    現在のエンジンのモデルを解放してメモリを開放
+
+    Args:
+        data: {"engine": "ollama"|"swallow"|"apple"}
+
+    Returns:
+        切り替え結果
+    """
+    try:
+        new_engine = data.get("engine", "ollama")
+
+        logger.info(f"Switching translation engine to: {new_engine}")
+
+        # Swallowモデルを解放（新しいエンジンがSwallow以外の場合）
+        if new_engine != "swallow":
+            unloaded = unload_swallow_translator()
+            if unloaded:
+                logger.info("Swallow model unloaded to free memory")
+
+        return JSONResponse({
+            "success": True,
+            "engine": new_engine,
+            "message": f"Engine switched to {new_engine}"
+        })
+
+    except Exception as e:
+        logger.error(f"Engine switch error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Engine switch error: {str(e)}")
+
+
+# ========== ヘルパー関数 ==========
+
+def _generate_text_file(
+    pages_data: List[Dict],
+    format_type: str,
+    document_type: str = None,
+    translation_engine: str = None,
+    ollama_model: str = None
+) -> str:
     """
     翻訳結果からテキストファイルを生成
 
     Args:
         pages_data: ページデータ
         format_type: "original", "translated", "both"
+        document_type: 文書タイプ
+        translation_engine: 翻訳エンジン
+        ollama_model: Ollamaモデル名
 
     Returns:
         テキストコンテンツ
     """
+    # 文書タイプの表示名マッピング
+    document_type_names = {
+        'steel_technical': '鉄鋼業における技術文書',
+        'general_technical': '一般的な技術文書',
+        'academic_paper': '技術論文',
+        'contract': '契約書',
+        'general_document': '一般的な文書',
+        'order_acceptance': '注文書・検収書',
+    }
+
+    # 翻訳エンジンの表示名マッピング
+    engine_names = {
+        'ollama': 'バランス',
+        'swallow': '日本語重視',
+        'apple': '簡易翻訳',
+    }
+
     lines = []
     lines.append("=" * 80)
     lines.append("PDF Translation Result")
     lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # 文書タイプを追加
+    if document_type:
+        doc_type_display = document_type_names.get(document_type, document_type)
+        lines.append(f"Document Type: {doc_type_display}")
+
+    # 翻訳エンジンを追加
+    if translation_engine:
+        engine_display = engine_names.get(translation_engine, translation_engine)
+        if translation_engine == 'ollama' and ollama_model:
+            lines.append(f"Translation Engine: {engine_display} ({ollama_model})")
+        else:
+            lines.append(f"Translation Engine: {engine_display}")
+
     lines.append("=" * 80)
     lines.append("")
 

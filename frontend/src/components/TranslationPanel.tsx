@@ -1,29 +1,52 @@
 import React from 'react';
-import { TranslatedPage } from '../types';
+import { TranslatedPage, TranslationDirection } from '../types';
 
 interface TranslationPanelProps {
   translatedPages: TranslatedPage[];
   currentPage: number;
   isTranslating: boolean;
-  selectedQuality?: string;
+  translationEngine?: 'apple' | 'ollama' | 'swallow';
+  ollamaModel?: string;
+  translationDirection?: TranslationDirection;
 }
 
 const TranslationPanel: React.FC<TranslationPanelProps> = ({
   translatedPages,
   currentPage,
   isTranslating,
-  selectedQuality = 'balanced',
+  translationEngine = 'ollama',
+  ollamaModel = 'qwen3:4b-instruct',
+  translationDirection = 'en-to-ja',
 }) => {
   const currentTranslation = translatedPages.find(p => p.page === currentPage);
 
-  // モデル名の取得
-  const getModelName = (quality: string) => {
-    const modelMap: Record<string, string> = {
-      'high': 'Qwen3-14B',
-      'balanced': 'Qwen2.5-7B',
-      'fast': 'Qwen2.5-3B'
-    };
-    return modelMap[quality] || 'Qwen2.5-7B';
+  // 翻訳方向に応じたラベル
+  const sourceLabel = translationDirection === 'ja-to-en' ? '日本語 (原文)' : '英語 (原文)';
+  const targetLabel = translationDirection === 'ja-to-en' ? '英語 (翻訳)' : '日本語 (翻訳)';
+  const headerTitle = translationDirection === 'ja-to-en'
+    ? `英語翻訳 (ページ ${currentPage})`
+    : `日本語翻訳 (ページ ${currentPage})`;
+
+  // 使用中のエンジン・モデル名を取得
+  const getEngineDisplayName = () => {
+    if (translationEngine === 'apple') {
+      return 'Apple翻訳';
+    } else if (translationEngine === 'ollama') {
+      // Ollamaモデル名を整形
+      const modelDisplayNames: Record<string, string> = {
+        'qwen3:4b-instruct': 'Ollama (Qwen3 4B)',
+        'qwen2.5:7b-instruct': 'Ollama (Qwen2.5 7B)',
+        'llama3.1:8b': 'Ollama (Llama 3.1 8B)',
+        'qwen3-vl:8b-instruct': 'Ollama (Qwen3-VL 8B)',
+        'qwen3:14b': 'Ollama (Qwen3 14B)',
+        'qwen2.5:14b': 'Ollama (Qwen2.5 14B)',
+      };
+      return modelDisplayNames[ollamaModel] || `Ollama (${ollamaModel})`;
+    } else if (translationEngine === 'swallow') {
+      return 'Swallow (Llama-3.1-8B)';
+    } else {
+      return 'Ollama';
+    }
   };
 
   if (isTranslating) {
@@ -31,7 +54,7 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
       <div style={styles.container}>
         <div style={styles.loading}>
           <div style={styles.spinner}></div>
-          <p>翻訳中... ({getModelName(selectedQuality)}で処理しています)</p>
+          <p>翻訳中... ({getEngineDisplayName()}で処理しています)</p>
           <p style={styles.loadingNote}>
             この処理には時間がかかる場合があります
           </p>
@@ -53,12 +76,12 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
   return (
     <div style={styles.container}>
       <div style={styles.header}>
-        <h3 style={styles.title}>日本語翻訳 (ページ {currentPage})</h3>
+        <h3 style={styles.title}>{headerTitle}</h3>
       </div>
       <div style={styles.content}>
         {/* オリジナルテキスト */}
         <div style={styles.section}>
-          <h4 style={styles.sectionTitle}>英語 (原文)</h4>
+          <h4 style={styles.sectionTitle}>{sourceLabel}</h4>
           <div style={styles.textBox}>
             <pre style={styles.text}>{currentTranslation.original.text}</pre>
           </div>
@@ -68,7 +91,7 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
 
         {/* 翻訳テキスト */}
         <div style={styles.section}>
-          <h4 style={styles.sectionTitle}>日本語 (翻訳)</h4>
+          <h4 style={styles.sectionTitle}>{targetLabel}</h4>
           <div style={styles.textBox}>
             <pre style={styles.text}>{currentTranslation.translated.text}</pre>
           </div>

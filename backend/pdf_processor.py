@@ -240,8 +240,17 @@ do {
     def _has_encoding_issues(text: str) -> bool:
         """
         テキストにエンコーディング問題（文字化け）があるかチェック
+        日本語テキストは文字化けと誤認識しないように注意
         """
         if not text or len(text) < 50:
+            return False
+
+        # 日本語文字（ひらがな、カタカナ、漢字）をチェック
+        japanese_chars = len(re.findall(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', text))
+
+        # 日本語が含まれている場合は文字化けではない
+        if japanese_chars > 10:
+            logger.info(f"Japanese text detected: {japanese_chars} Japanese characters")
             return False
 
         # 英数字と一般的な記号の比率をチェック

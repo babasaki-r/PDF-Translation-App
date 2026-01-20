@@ -27,6 +27,28 @@ export interface UploadResponse {
   filename: string;
   info: PDFInfo;
   pages: PageData[];
+  contains_japanese?: boolean;
+}
+
+export type TranslationDirection = 'en-to-ja' | 'ja-to-en';
+
+export type DocumentType =
+  | 'steel_technical'
+  | 'general_technical'
+  | 'academic_paper'
+  | 'contract'
+  | 'general_document'
+  | 'order_acceptance';
+
+export interface DocumentTypeInfo {
+  id: DocumentType;
+  name: string;
+  description: string;
+}
+
+export interface DocumentTypesResponse {
+  success: boolean;
+  document_types: DocumentTypeInfo[];
 }
 
 export interface TranslationResponse {

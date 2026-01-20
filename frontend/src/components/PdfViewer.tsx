@@ -3,8 +3,13 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
-// PDF.js workerの設定
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+// PDF.js workerの設定（ローカルファイルを使用）
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js';
+
+// 日本語PDFの表示に必要なCMaps設定（ローカルファイルを使用）
+const cMapUrl = '/cmaps/';
+const cMapPacked = true;
+const standardFontDataUrl = '/standard_fonts/';
 
 interface PdfViewerProps {
   file: File | null;
@@ -19,9 +24,52 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
 }) => {
   const [numPages, setNumPages] = React.useState<number>(0);
   const [scale, setScale] = React.useState<number>(1.0);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [fileUrl, setFileUrl] = React.useState<string | null>(null);
+
+  // FileオブジェクトをBlobURLに変換
+  React.useEffect(() => {
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setFileUrl(url);
+      setLoadError(null);
+      console.log('PDF file URL created:', url);
+
+      // クリーンアップ
+      return () => {
+        URL.revokeObjectURL(url);
+        setFileUrl(null);
+      };
+    } else {
+      setFileUrl(null);
+    }
+  }, [file]);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    console.log('PDF loaded successfully, numPages:', numPages);
     setNumPages(numPages);
+    setLoadError(null);
+  };
+
+  const onDocumentLoadError = (error: Error) => {
+    console.error('PDF load error:', error);
+    setLoadError(`PDFの読み込みに失敗しました: ${error.message}`);
+  };
+
+  const onPageLoadSuccess = () => {
+    console.log('Page loaded successfully:', currentPage);
+  };
+
+  const onPageLoadError = (error: Error) => {
+    console.error('Page load error:', error);
+  };
+
+  const onPageRenderSuccess = () => {
+    console.log('Page rendered successfully:', currentPage);
+  };
+
+  const onPageRenderError = (error: Error) => {
+    console.error('Page render error:', error);
   };
 
   const handleZoomIn = () => {
@@ -36,7 +84,7 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
     setScale(1.0);
   };
 
-  if (!file) {
+  if (!file || !fileUrl) {
     return (
       <div style={styles.empty}>
         <p>PDFファイルをアップロードしてください</p>
@@ -96,21 +144,44 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
       </div>
       <div style={styles.pdfContainer}>
         <Document
-          file={file}
+          file={fileUrl}
           onLoadSuccess={onDocumentLoadSuccess}
+          onLoadError={onDocumentLoadError}
           loading={<div style={styles.loading}>PDFを読み込み中...</div>}
+          error={<div style={styles.error}>{loadError || 'PDFの読み込みに失敗しました'}</div>}
+          options={{
+            cMapUrl: cMapUrl,
+            cMapPacked: cMapPacked,
+            standardFontDataUrl: standardFontDataUrl,
+            disableFontFace: false,
+            useSystemFonts: true,
+          }}
         >
           <Page
             pageNumber={currentPage}
             scale={scale}
             renderTextLayer={true}
             renderAnnotationLayer={true}
+            onLoadSuccess={onPageLoadSuccess}
+            onLoadError={onPageLoadError}
+            onRenderSuccess={onPageRenderSuccess}
+            onRenderError={onPageRenderError}
           />
         </Document>
       </div>
     </div>
   );
 };
+
+// React.memoで不要な再レンダリングを防止
+export default React.memo(PdfViewer, (prevProps, nextProps) => {
+  // file, currentPage, onPageChangeが同じなら再レンダリングしない
+  return (
+    prevProps.file === nextProps.file &&
+    prevProps.currentPage === nextProps.currentPage &&
+    prevProps.onPageChange === nextProps.onPageChange
+  );
+});
 
 const styles = {
   container: {
@@ -203,6 +274,12 @@ const styles = {
     textAlign: 'center' as const,
     color: '#718096',
   } as React.CSSProperties,
+  error: {
+    padding: '20px',
+    textAlign: 'center' as const,
+    color: '#e53e3e',
+    backgroundColor: '#fed7d7',
+    borderRadius: '8px',
+    margin: '20px',
+  } as React.CSSProperties,
 };
-
-export default PdfViewer;
