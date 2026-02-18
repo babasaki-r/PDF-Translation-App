@@ -431,6 +431,33 @@ def get_swallow_translator() -> SwallowTranslator:
     return _swallow_translator
 
 
+def get_swallow_progress_safe() -> Dict:
+    """
+    Swallowモデルのロードを誘発せずに翻訳進捗を取得
+
+    Returns:
+        進捗情報
+    """
+    global _swallow_translator
+    if _swallow_translator is not None:
+        return _swallow_translator.get_progress()
+    return {"current": 0, "total": 0, "percentage": 0}
+
+
+def cancel_swallow_safe() -> bool:
+    """
+    Swallowモデルのロードを誘発せずに翻訳をキャンセル
+
+    Returns:
+        キャンセルが実行されたかどうか
+    """
+    global _swallow_translator
+    if _swallow_translator is not None:
+        _swallow_translator.cancel_translation()
+        return True
+    return False
+
+
 def unload_swallow_translator():
     """
     Swallowモデルをメモリから解放
@@ -781,6 +808,33 @@ class AppleTranslator:
 
 # Apple翻訳エンジンのグローバルインスタンス
 _apple_translator = None
+
+
+def get_apple_progress_safe() -> Dict:
+    """
+    Appleトランスレータの生成を誘発せずに翻訳進捗を取得
+
+    Returns:
+        進捗情報
+    """
+    global _apple_translator
+    if _apple_translator is not None:
+        return _apple_translator.get_progress()
+    return {"current": 0, "total": 0, "percentage": 0}
+
+
+def cancel_apple_safe() -> bool:
+    """
+    Appleトランスレータの生成を誘発せずに翻訳をキャンセル
+
+    Returns:
+        キャンセルが実行されたかどうか
+    """
+    global _apple_translator
+    if _apple_translator is not None:
+        _apple_translator.cancel_translation()
+        return True
+    return False
 
 
 def get_apple_translator() -> AppleTranslator:
@@ -1176,6 +1230,33 @@ Japanese Translation (日本語訳):"""
 
 # Ollama翻訳エンジンのグローバルインスタンス
 _ollama_translator = None
+
+
+def get_ollama_progress_safe() -> Dict:
+    """
+    Ollamaトランスレータのロードを誘発せずに翻訳進捗を取得
+
+    Returns:
+        進捗情報
+    """
+    global _ollama_translator
+    if _ollama_translator is not None:
+        return _ollama_translator.get_progress()
+    return {"current": 0, "total": 0, "percentage": 0}
+
+
+def cancel_ollama_safe() -> bool:
+    """
+    Ollamaトランスレータのロードを誘発せずに翻訳をキャンセル
+
+    Returns:
+        キャンセルが実行されたかどうか
+    """
+    global _ollama_translator
+    if _ollama_translator is not None:
+        _ollama_translator.cancel_translation()
+        return True
+    return False
 
 
 def get_ollama_translator(model: str = None) -> OllamaTranslator:

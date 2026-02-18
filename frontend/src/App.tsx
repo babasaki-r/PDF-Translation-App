@@ -7,6 +7,7 @@ import GlossaryPanel from './components/GlossaryPanel';
 import QuestionPanel from './components/QuestionPanel';
 import {
   uploadPDF,
+  healthCheck,
   translatePagesApple, getAppleProgress, cancelAppleTranslation,
   translatePagesOllama, getOllamaProgress, cancelOllamaTranslation,
   translatePagesSwallow, getSwallowProgress, cancelSwallowTranslation,
@@ -31,6 +32,7 @@ function App() {
     percentage: number;
   } | null>(null);
   const progressIntervalRef = useRef<number | null>(null);
+  const errorTimeoutRef = useRef<number | null>(null);
   const [showQuestionPanel, setShowQuestionPanel] = useState(false);
   const [translationEngine, setTranslationEngine] = useState<'apple' | 'ollama' | 'swallow'>('ollama');
   const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
@@ -41,6 +43,40 @@ function App() {
   const swallowStatusIntervalRef = useRef<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
   const ollamaStatusIntervalRef = useRef<number | null>(null);
+  const [backendReady, setBackendReady] = useState(false);
+
+  // エラーメッセージの表示（自動消去付き）
+  const showError = useCallback((message: string, autoDismissMs: number = 8000) => {
+    setError(message);
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+    if (autoDismissMs > 0) {
+      errorTimeoutRef.current = window.setTimeout(() => {
+        setError(null);
+        errorTimeoutRef.current = null;
+      }, autoDismissMs);
+    }
+  }, []);
+
+  // バックエンド接続確認
+  useEffect(() => {
+    let cancelled = false;
+    const checkBackend = async () => {
+      try {
+        await healthCheck();
+        if (!cancelled) setBackendReady(true);
+      } catch {
+        if (!cancelled) {
+          setBackendReady(false);
+          // 3秒後にリトライ
+          setTimeout(checkBackend, 3000);
+        }
+      }
+    };
+    checkBackend();
+    return () => { cancelled = true; };
+  }, []);
 
   // Ollamaモデル一覧を取得
   useEffect(() => {
@@ -153,6 +189,13 @@ function App() {
 
     try {
       const response = await uploadPDF(selectedFile);
+
+      if (!response.pages || response.pages.length === 0) {
+        showError('PDFからテキストを抽出できませんでした。スキャンPDFの可能性があります。');
+        setFile(null);
+        return;
+      }
+
       setPagesData(response.pages);
       console.log(`PDF uploaded: ${response.info.pages} pages`);
 
@@ -164,9 +207,18 @@ function App() {
         setTranslationDirection('en-to-ja');
         console.log('No Japanese detected, setting direction to en-to-ja');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Upload error:', err);
-      setError('PDFのアップロードに失敗しました');
+      let errorMessage = 'PDFのアップロードに失敗しました。';
+      if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
+        errorMessage = 'アップロードがタイムアウトしました。ファイルサイズが大きい可能性があります。';
+      } else if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network Error')) {
+        errorMessage = 'バックエンドに接続できません。サーバーが起動しているか確認してください。';
+        setBackendReady(false);
+      } else if (err?.response?.status === 500) {
+        errorMessage = `PDF処理エラー: ${err.response?.data?.detail || '不明なエラー'}`;
+      }
+      showError(errorMessage, 10000);
       setFile(null);
     } finally {
       setIsUploading(false);
@@ -234,9 +286,17 @@ function App() {
         console.log('Translation completed with Ollama (default):', selectedOllamaModel, 'direction:', translationDirection, 'docType:', documentType);
       }
       setTranslatedPages(response.pages);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Translation error:', err);
-      setError('翻訳に失敗しました。バックエンドが起動しているか確認してください。');
+      let errorMessage = '翻訳に失敗しました。';
+      if (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) {
+        errorMessage = '翻訳がタイムアウトしました。ページ数が多い場合は時間がかかります。';
+      } else if (err?.code === 'ERR_NETWORK' || err?.message?.includes('Network Error')) {
+        errorMessage = 'バックエンドに接続できません。サーバーが起動しているか確認してください。';
+      } else if (err?.response?.data?.detail) {
+        errorMessage = `翻訳エラー: ${err.response.data.detail}`;
+      }
+      showError(errorMessage, 10000);
     } finally {
       setIsTranslating(false);
     }
@@ -254,10 +314,11 @@ function App() {
         await cancelOllamaTranslation();
       }
       setIsTranslating(false);
-      setError('翻訳を中断しました');
+      showError('翻訳を中断しました', 5000);
     } catch (err) {
       console.error('Cancel error:', err);
-      setError('翻訳の中断に失敗しました');
+      setIsTranslating(false);
+      showError('翻訳の中断に失敗しました');
     }
   };
 
@@ -303,9 +364,13 @@ function App() {
       }
       setTranslatedPages(response.pages);
       console.log('Re-translation completed with direction:', translationDirection, 'docType:', documentType);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Re-translation error:', err);
-      setError('再翻訳に失敗しました。');
+      let errorMessage = '再翻訳に失敗しました。';
+      if (err?.response?.data?.detail) {
+        errorMessage = `再翻訳エラー: ${err.response.data.detail}`;
+      }
+      showError(errorMessage, 10000);
     } finally {
       setIsTranslating(false);
     }
@@ -458,10 +523,18 @@ function App() {
         onClose={() => setShowQuestionPanel(false)}
       />
 
-      {/* エラー表示 */}
+      {/* バックエンド未接続の警告 */}
+      {!backendReady && (
+        <div style={styles.backendWarning}>
+          バックエンドに接続中... サーバーが起動しているか確認してください
+        </div>
+      )}
+
+      {/* エラー表示（クリックで閉じる） */}
       {error && (
-        <div style={styles.error}>
+        <div style={styles.error} onClick={() => setError(null)} title="クリックで閉じる">
           <strong>エラー:</strong> {error}
+          <span style={styles.errorClose}>×</span>
         </div>
       )}
     </div>
@@ -583,13 +656,37 @@ const styles = {
     bottom: '80px',
     left: '50%',
     transform: 'translateX(-50%)',
-    padding: '16px',
+    padding: '16px 40px 16px 16px',
     backgroundColor: '#fc8181',
     color: 'white',
     borderRadius: '6px',
     boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-    maxWidth: '400px',
+    maxWidth: '500px',
     zIndex: 1100,
+    cursor: 'pointer',
+  } as React.CSSProperties,
+  errorClose: {
+    position: 'absolute' as const,
+    top: '8px',
+    right: '12px',
+    fontSize: '18px',
+    fontWeight: 'bold' as const,
+    cursor: 'pointer',
+    opacity: 0.8,
+  } as React.CSSProperties,
+  backendWarning: {
+    position: 'fixed' as const,
+    top: '60px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '10px 20px',
+    backgroundColor: '#ed8936',
+    color: 'white',
+    borderRadius: '6px',
+    boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+    zIndex: 1200,
+    fontSize: '14px',
+    fontWeight: 'bold' as const,
   } as React.CSSProperties,
   questionButton: {
     position: 'fixed' as const,

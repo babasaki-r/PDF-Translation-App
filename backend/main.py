@@ -11,9 +11,15 @@ from datetime import datetime
 from pdf_processor import PDFProcessor, PDFTextMerger
 from translator import (
     get_apple_translator,
+    get_apple_progress_safe,
+    cancel_apple_safe,
     get_ollama_translator,
+    get_ollama_progress_safe,
+    cancel_ollama_safe,
     get_swallow_translator,
     get_swallow_status,
+    get_swallow_progress_safe,
+    cancel_swallow_safe,
     unload_swallow_translator,
     get_document_types,
     load_glossary_from_file,
@@ -63,11 +69,9 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """詳細なヘルスチェック"""
-    ollama_translator = get_ollama_translator()
+    """詳細なヘルスチェック（トランスレータの生成を誘発しない）"""
     return {
         "status": "healthy",
-        "ollama_available": ollama_translator.ollama_available if ollama_translator else False,
         "engines": ["ollama", "swallow", "apple"]
     }
 
@@ -366,14 +370,13 @@ async def translate_pages_apple(data: Dict):
 async def get_apple_translation_progress():
     """
     Apple翻訳の進捗状況を取得
+    注意: トランスレータの生成を誘発しないように安全な関数を使用
 
     Returns:
         進捗情報
     """
     try:
-        translator = get_apple_translator()
-        progress = translator.get_progress()
-
+        progress = get_apple_progress_safe()
         return JSONResponse({
             "success": True,
             "progress": progress
@@ -388,17 +391,17 @@ async def get_apple_translation_progress():
 async def cancel_apple_translation():
     """
     Apple翻訳処理をキャンセル
+    注意: トランスレータの生成を誘発しないように安全な関数を使用
 
     Returns:
         キャンセル結果
     """
     try:
-        translator = get_apple_translator()
-        translator.cancel_translation()
+        cancelled = cancel_apple_safe()
 
         return JSONResponse({
             "success": True,
-            "message": "Apple translation cancellation requested"
+            "message": "Apple translation cancellation requested" if cancelled else "No active Apple translation to cancel"
         })
 
     except Exception as e:
@@ -549,14 +552,13 @@ async def translate_pages_ollama(data: Dict):
 async def get_ollama_translation_progress():
     """
     Ollama翻訳の進捗状況を取得
+    注意: トランスレータの生成を誘発しないように安全な関数を使用
 
     Returns:
         進捗情報
     """
     try:
-        translator = get_ollama_translator()
-        progress = translator.get_progress()
-
+        progress = get_ollama_progress_safe()
         return JSONResponse({
             "success": True,
             "progress": progress
@@ -571,17 +573,17 @@ async def get_ollama_translation_progress():
 async def cancel_ollama_translation():
     """
     Ollama翻訳処理をキャンセル
+    注意: トランスレータの生成を誘発しないように安全な関数を使用
 
     Returns:
         キャンセル結果
     """
     try:
-        translator = get_ollama_translator()
-        translator.cancel_translation()
+        cancelled = cancel_ollama_safe()
 
         return JSONResponse({
             "success": True,
-            "message": "Ollama translation cancellation requested"
+            "message": "Ollama translation cancellation requested" if cancelled else "No active Ollama translation to cancel"
         })
 
     except Exception as e:
@@ -728,14 +730,13 @@ async def translate_pages_swallow(data: Dict):
 async def get_swallow_translation_progress():
     """
     Swallow翻訳の進捗状況を取得
+    注意: モデルのロードを誘発しないように安全な関数を使用
 
     Returns:
         進捗情報
     """
     try:
-        translator = get_swallow_translator()
-        progress = translator.get_progress()
-
+        progress = get_swallow_progress_safe()
         return JSONResponse({
             "success": True,
             "progress": progress
@@ -750,17 +751,17 @@ async def get_swallow_translation_progress():
 async def cancel_swallow_translation():
     """
     Swallow翻訳処理をキャンセル
+    注意: モデルのロードを誘発しないように安全な関数を使用
 
     Returns:
         キャンセル結果
     """
     try:
-        translator = get_swallow_translator()
-        translator.cancel_translation()
+        cancelled = cancel_swallow_safe()
 
         return JSONResponse({
             "success": True,
-            "message": "Swallow translation cancellation requested"
+            "message": "Swallow translation cancellation requested" if cancelled else "No active Swallow translation to cancel"
         })
 
     except Exception as e:

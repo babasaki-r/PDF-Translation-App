@@ -5,6 +5,7 @@ const API_BASE_URL = 'http://localhost:8002';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 300000, // 5分（翻訳処理は長時間かかる場合がある）
   headers: {
     'Content-Type': 'application/json',
   },
@@ -14,13 +15,14 @@ export const uploadPDF = async (file: File): Promise<UploadResponse> => {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await axios.post<UploadResponse>(
-    `${API_BASE_URL}/api/pdf/upload`,
+  const response = await api.post<UploadResponse>(
+    '/api/pdf/upload',
     formData,
     {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 120000, // アップロードは2分タイムアウト
     }
   );
 
